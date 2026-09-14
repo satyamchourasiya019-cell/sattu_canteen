@@ -1,0 +1,135 @@
+/* ------------------------------ Employee pages ------------------------- */
+.order-wrap {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px 14px 48px;
+}
+.order-wrap.center { text-align: center; padding-top: 64px; }
+
+.order-header { text-align: center; margin: 12px 0 20px; }
+.order-header h1 { font-size: 1.35rem; margin: 8px 0 2px; }
+.order-logo { font-size: 2.2rem; }
+
+.order-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 16px;
+  box-shadow: 0 1px 3px rgba(15, 46, 77, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.order-title { margin: 0; font-size: 1.15rem; }
+.order-subtitle { margin: 6px 0 0; font-size: 0.95rem; color: var(--ink-soft); }
+
+/* identity card */
+.id-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--brand-soft);
+  border-radius: 12px;
+  padding: 12px;
+}
+.id-card.compact { padding: 10px 12px; }
+.id-avatar {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.2rem;
+  display: flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+}
+.id-name { font-weight: 700; }
+.id-meta { font-size: 0.85rem; color: var(--ink-soft); }
+
+/* QR destination buttons */
+.qr-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  text-decoration: none;
+  color: var(--ink);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.qr-btn:active { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.15); }
+.qr-btn-icon { font-size: 1.8rem; }
+.qr-btn strong { display: block; }
+.qr-btn small { color: var(--ink-soft); }
+
+.logout-link { align-self: center; margin-top: 4px; }
+
+/* addon checklist */
+.addon-list { display: flex; flex-direction: column; gap: 8px; }
+.addon-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  background: #fff;
+}
+.addon-row.selected { border-color: var(--accent); background: #f4f9ff; }
+.addon-row input { width: 18px; height: 18px; accent-color: var(--accent); }
+.addon-name { flex: 1; font-weight: 500; }
+.addon-price { font-weight: 600; color: var(--ink-soft); }
+
+/* totals */
+.total-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--brand-soft);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 1.05rem;
+}
+.total-bar strong { font-size: 1.3rem; }
+
+/* success / error */
+.success-card, .error-card { text-align: center; align-items: center; }
+.success-icon {
+  width: 60px; height: 60px;
+  border-radius: 50%;
+  background: var(--ok);
+  color: #fff;
+  font-size: 1.8rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.error-icon {
+  width: 60px; height: 60px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  font-size: 1.8rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.confirm-box {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 6px 0;
+}
+.confirm-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+.confirm-row:last-child { border-bottom: none; }
+.confirm-row span { color: var(--ink-soft); }
+.total-strong { color: var(--brand); font-size: 1.1rem; }
+
+.center-text { text-align: center; }
+.field-error { color: var(--danger); font-size: 0.85rem; margin: -6px 0 0; }

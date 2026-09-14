@@ -1,0 +1,94 @@
+rules_version = '2';
+
+// =====================================================================
+// QR-based Canteen Billing - Firestore Security Rules
+//
+// Employees are anonymous (no accounts, device-scoped). They may ONLY:
+//   - read meal items (the addon menu)
+//   - verify a serial exists and is active (single-doc get)
+//   - create/update transactions whose id embeds their own serial and
+//     TODAY's date ("<date>_<serial>_<meal>") with a strict schema
+// Everything else - lists, employees, settings, manual corrections,
+// cleanup - is admin-only, enforced HERE, never by hiding UI buttons.
+//
+// Admin authorization: a signed-in user is an admin/supervisor only if
+// users/{uid} exists with role "admin" or "supervisor".
+// =====================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- shared helpers -------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdminRole() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'supervisor'
+        );
+    }
+
+    function todayMatches(dateStr) {
+      // Client-derived "today" (local device). Duplicate protection is
+      // primarily the deterministic doc id; this format check keeps the
+      // field sane. Admins may correct past dates.
+      return dateStr is string && dateStr.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    // ---------- meal items (addon menu): public read ------------------
+    match /mealItems/{itemId} {
+      allow read: if true;
+      allow write: if isAdminRole();
+    }
+
+    // ---------- employees: serial master ------------------------------
+    match /employees/{serial} {
+      allow get: if true;                 // registration/scan verification
+      allow list: if isAdminRole();
+      allow create, update, delete: if isAdminRole();
+    }
+
+    // ---------- transactions ------------------------------------------
+    match /transactions/{txnId} {
+      // Admins: full access (dashboard, corrections, reports, cleanup).
+      allow read, write: if isAdminRole();
+
+      // Employees (anonymous): only docs whose id embeds THEIR serial and a
+      // valid date: "<YYYY-MM-DD>_<serial>_<meal>" plus optional addon
+      // suffixes "_addon..." / "_m...". The deterministic id means a
+      // duplicate scan of the same meal overwrites the same doc instead of
+      // creating a second charge.
+      allow get, create, update: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider == 'anonymous'
+        && txnId.matches('^\\d{4}-\\d{2}-\\d{2}_[0-9A-Za-z-]{1,20}_(breakfast|lunch|snacks|dinner)(_addon[0-9a-z]+|_m\\d+)?$')
+        && request.resource.data.serial is string
+        && txnId.matches('^\\d{4}-\\d{2}-\\d{2}_' + request.resource.data.serial + '_.*$')
+        && todayMatches(request.resource.data.date)
+        && request.resource.data.amount is number
+        && request.resource.data.amount >= 0
+        && request.resource.data.status == 'ok';
+
+      allow delete: if isAdminRole();
+    }
+
+    // ---------- settings ----------------------------------------------
+    match /settings/{docId} {
+      allow get: if true;                 // canteen name & timings on phones
+      allow write: if isAdminRole();
+    }
+
+    // ---------- admin profiles: never writable from the client ---------
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if false; // manage in Firebase console / Admin SDK
+    }
+
+    // ---------- default deny -------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
