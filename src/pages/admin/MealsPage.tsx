@@ -7,6 +7,8 @@ import { friendlyMessage } from '../../utils/errors';
 import { formatCurrency } from '../../utils/format';
 import { MEAL_LABELS, MEALS, type MealItem, type MealTimings, type MealType } from '../../types';
 
+const MEAL_IDS = new Set<string>(MEALS);
+
 /** Admin "Meals & Items": meal prices, time windows, and the addon menu. */
 export default function MealsPage(): JSX.Element {
   const { items, loading, error } = useMealItems();
@@ -26,6 +28,9 @@ export default function MealsPage(): JSX.Element {
 
   useEffect(() => setTimings(settings.mealTimings), [settings.mealTimings]);
 
+  const mealPriceItems = items.filter((i) => MEAL_IDS.has(i.id));
+  const addonItems = items.filter((i) => !MEAL_IDS.has(i.id));
+
   function flash(msg: string): void {
     setMessage(msg);
     setFormError(null);
@@ -40,7 +45,7 @@ export default function MealsPage(): JSX.Element {
     setBusy(true);
     try {
       await saveMealItem({ ...item, price });
-      flash(`${item.name} price updated to ${formatCurrency(price)}.`);
+      flash(`${item.name} price updated to ${formatCurrency(price)}. Future scans use the new price; past transactions stay unchanged.`);
       setPriceDraft((p) => ({ ...p, [id]: '' }));
     } catch (err) {
       setFormError(friendlyMessage(err));
@@ -119,6 +124,51 @@ export default function MealsPage(): JSX.Element {
       {loading && <div className="banner banner-info">Loading items…</div>}
 
       <section className="panel">
+        <h2 className="section-title">Meal Prices</h2>
+        <p className="muted small">
+          These four prices are charged when an employee scans the matching QR. Price changes
+          apply to future scans only — old transactions keep their original amount.
+        </p>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead><tr><th>Meal</th><th>Current Price</th><th>New Price</th><th /></tr></thead>
+            <tbody>
+              {MEALS.map((m) => {
+                const item = mealPriceItems.find((i) => i.id === m);
+                const current = item ? item.price : null;
+                return (
+                  <tr key={m}>
+                    <td><strong>{MEAL_LABELS[m]}</strong></td>
+                    <td>{current === null ? <span className="muted">default</span> : <strong>{formatCurrency(current)}</strong>}</td>
+                    <td>
+                      <div className="inline-edit">
+                        <input
+                          type="number"
+                          min={0}
+                          placeholder={current !== null ? String(current) : '—'}
+                          value={priceDraft[m] ?? ''}
+                          onChange={(e) => setPriceDraft((p) => ({ ...p, [m]: e.target.value }))}
+                        />
+                        <button
+                          type="button"
+                          className="btn-ghost small"
+                          disabled={busy || !priceDraft[m]}
+                          onClick={() => void handleSavePrice(m)}
+                        >
+                          Update
+                        </button>
+                      </div>
+                    </td>
+                    <td className="small-cell">{current === null ? 'Save once to set' : ''}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
         <h2 className="section-title">Meal Timings (drives QR time detection)</h2>
         <p className="muted small">
           When an employee scans a QR, the system checks the current server time against these windows and
@@ -155,7 +205,7 @@ export default function MealsPage(): JSX.Element {
               <tr><th>Item</th><th>Price</th><th>New Price</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              {items.map((i) => (
+              {addonItems.map((i) => (
                 <tr key={i.id} className={i.enabled ? '' : 'row-inactive'}>
                   <td>{i.name}</td>
                   <td><strong>{formatCurrency(i.price)}</strong></td>
@@ -171,7 +221,7 @@ export default function MealsPage(): JSX.Element {
                       <button
                         type="button"
                         className="btn-ghost small"
-                        disabled={busy || priceDraft[i.id] === undefined || priceDraft[i.id] === ''}
+                        disabled={busy || !priceDraft[i.id]}
                         onClick={() => void handleSavePrice(i.id)}
                       >
                         Update
@@ -189,7 +239,7 @@ export default function MealsPage(): JSX.Element {
                   </td>
                 </tr>
               ))}
-              {items.length === 0 && !loading && (
+              {addonItems.length === 0 && !loading && (
                 <tr><td colSpan={5} className="empty-row">No items yet — add the first one below.</td></tr>
               )}
             </tbody>

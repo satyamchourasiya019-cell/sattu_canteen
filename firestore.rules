@@ -45,10 +45,36 @@ service cloud.firestore {
     }
 
     // ---------- employees: serial master ------------------------------
+    // Public: verify a serial (get). Self-registration may CREATE a serial
+    // (when allowSelfRegistration is on) and may FILL EMPTY identity fields
+    // only. Claimed fields (non-empty name) can never be changed publicly,
+    // and active/delete always stay admin-only.
+    function identityFieldsUnchanged(existing, incoming) {
+      return (
+        (existing.get('name', '') == incoming.get('name', ''))
+        && (existing.get('employeeNo', '') == incoming.get('employeeNo', ''))
+        && (existing.get('department', '') == incoming.get('department', ''))
+      );
+    }
+
+    function onlyFillsEmptyFields(existing, incoming) {
+      return incoming.get('name', '') == (existing.get('name', '').size() > 0 ? existing.get('name', '') : incoming.get('name', ''))
+        && incoming.get('employeeNo', '') == (existing.get('employeeNo', '').size() > 0 ? existing.get('employeeNo', '') : incoming.get('employeeNo', ''))
+        && incoming.get('department', '') == (existing.get('department', '').size() > 0 ? existing.get('department', '') : incoming.get('department', ''));
+    }
+
     match /employees/{serial} {
-      allow get: if true;                 // registration/scan verification
+      allow get: if true;
       allow list: if isAdminRole();
-      allow create, update, delete: if isAdminRole();
+      allow create: if isAdminRole()
+        || (isSignedIn() && get(/databases/$(database)/documents/settings/general).data.get('allowSelfRegistration', false) == true
+            && serial.matches('^[0-9A-Za-z-]{1,20}$'));
+      allow update: if isAdminRole()
+        || (isSignedIn()
+            && resource.data.active != false
+            && request.resource.data.active != false
+            && onlyFillsEmptyFields(resource.data, request.resource.data));
+      allow delete: if isAdminRole();
     }
 
     // ---------- transactions ------------------------------------------

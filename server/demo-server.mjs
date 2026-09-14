@@ -50,6 +50,12 @@ function defaultDb() {
       // with the "allow self registration" toggle ON).
     },
     mealItems: {
+      // Meal price entries (id = meal name). Prices are editable by admins;
+      // these four ids are NOT shown in the addon dropdowns.
+      'breakfast': { id: 'breakfast', name: 'Breakfast', price: 30, enabled: true, isMeal: true },
+      'lunch': { id: 'lunch', name: 'Lunch', price: 50, enabled: true, isMeal: true },
+      'snacks': { id: 'snacks', name: 'Snacks', price: 15, enabled: true, isMeal: true },
+      'dinner': { id: 'dinner', name: 'Dinner', price: 50, enabled: true, isMeal: true },
       // Addon menu (admin-managed): Tea, Coffee, Milk, Juice, Curd, Sweet, ...
       'tea': { id: 'tea', name: 'Tea', price: 10, enabled: true },
       'coffee': { id: 'coffee', name: 'Coffee', price: 15, enabled: true },
@@ -97,6 +103,15 @@ function loadDb() {
     if (typeof db.settings.allowSelfRegistration !== 'boolean') {
       db.settings.allowSelfRegistration = true;
     }
+    // Migration: ensure the 4 meal-price entries exist in older data files.
+    let mealMigrationNeeded = false;
+    for (const [id, item] of Object.entries(fresh.mealItems)) {
+      if (item.isMeal && !db.mealItems[id]) {
+        db.mealItems[id] = item;
+        mealMigrationNeeded = true;
+      }
+    }
+    if (mealMigrationNeeded) saveDb();
   } catch {
     db = defaultDb();
     saveDb();
@@ -220,7 +235,9 @@ function mealPrice(meal) {
 }
 
 function addonById(id) {
-  return db.mealItems[id] && db.mealItems[id].enabled !== false ? db.mealItems[id] : null;
+  const item = db.mealItems[id];
+  // Meal-price entries (breakfast/lunch/...) are never selectable as addons.
+  return item && item.enabled !== false && !item.isMeal ? item : null;
 }
 
 // ------------------------------------------------------- realtime (SSE) ---
@@ -268,7 +285,7 @@ route('GET', /^\/api\/employees$/, async (req, res, m, body, s) => {
 route('GET', /^\/api\/employees\/([0-9A-Za-z-]{1,20})$/, async (req, res, m) => {
   const e = db.employees[m[1]];
   if (!e) return json(res, 404, { error: 'NOT_FOUND' });
-  json(res, 200, { serial: m[1], name: e.name, active: e.active });
+  json(res, 200, { serial: m[1], name: e.name, employeeNo: e.employeeNo || '', department: e.department || '', active: e.active });
 });
 
 function validateEmployeeBody(body) {
@@ -531,7 +548,7 @@ route('GET', /^\/api\/scan\/context$/, async (req, res) => {
     mealAmount: mealPrice(meal),
     alreadyTaken: Boolean(existing),
     existingTransaction: existing,
-    addons: Object.values(db.mealItems).filter((i) => i.enabled !== false).sort((a, b) => a.name.localeCompare(b.name)),
+    addons: Object.values(db.mealItems).filter((i) => i.enabled !== false && !i.isMeal).sort((a, b) => a.name.localeCompare(b.name)),
   });
 });
 

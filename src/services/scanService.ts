@@ -1,6 +1,6 @@
 import { BACKEND_MODE, requireDb, requireAuth } from '../firebase/config';
 import type { ConfirmScanResult, MealItem, ScanContext, Transaction } from '../types';
-import { DEFAULT_MEAL_PRICES, mealSlot } from '../types';
+import { DEFAULT_MEAL_PRICES, MEALS, mealSlot } from '../types';
 import { detectMeal } from '../utils/meals';
 import { toDateString, toTimeString } from '../utils/format';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -9,6 +9,18 @@ import * as api from './api';
 import { fetchSettings } from './settingsService';
 import { fetchMealItems } from './mealItemService';
 import { checkSerial } from './employeeService';
+
+const MEAL_IDS = new Set<string>(MEALS);
+
+/** Admin-set meal price from mealItems (falls back to the default). */
+function priceForMeal(items: MealItem[], meal: string): number {
+  const entry = items.find((i) => i.id === meal);
+  return entry && typeof entry.price === 'number' ? entry.price : DEFAULT_MEAL_PRICES[meal as keyof typeof DEFAULT_MEAL_PRICES] ?? 0;
+}
+
+function isAddon(item: MealItem): boolean {
+  return item.enabled && !MEAL_IDS.has(item.id);
+}
 
 /**
  * Employee QR scan flow.
@@ -76,10 +88,10 @@ export async function getScanContext(qrType: ScanContext['qrType']): Promise<Sca
     meal,
     time,
     date,
-    mealAmount: DEFAULT_MEAL_PRICES[meal],
+    mealAmount: priceForMeal(addons, meal),
     alreadyTaken: existingSnap.exists(),
     existingTransaction: existingSnap.exists() ? ({ ...(existingSnap.data() as Transaction), id: existingSnap.id } as Transaction) : null,
-    addons: addons.filter((i: MealItem) => i.enabled),
+    addons: addons.filter(isAddon),
   };
 }
 
@@ -100,13 +112,14 @@ export async function confirmScan(meal: string, addonIds: string[]): Promise<Con
   }
 
   const addons = addonIds
-    .map((id) => items.find((i) => i.id === id && i.enabled))
+    .map((id) => items.find((i) => i.id === id))
     .filter((i): i is MealItem => Boolean(i))
+    .filter(isAddon)
     .map((i) => ({ id: i.id, name: i.name, price: i.price }));
 
   const date = toDateString(d);
   const time = toTimeString(d);
-  const mealAmount = DEFAULT_MEAL_PRICES[meal as keyof typeof DEFAULT_MEAL_PRICES] ?? 0;
+  const mealAmount = priceForMeal(items, meal);
   const addonAmount = addons.reduce((s, a) => s + a.price, 0);
   const id = todayTxnId(date, serial, meal);
   const existing = await getDoc(doc(requireDb(), 'transactions', id));

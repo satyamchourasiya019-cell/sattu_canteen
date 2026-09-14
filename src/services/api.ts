@@ -172,10 +172,10 @@ export async function apiListEmployees(): Promise<Employee[]> {
   return res.employees;
 }
 
-export async function apiGetEmployee(serial: string): Promise<{ exists: boolean; active: boolean }> {
+export async function apiGetEmployee(serial: string): Promise<{ exists: boolean; active: boolean; employeeNo?: string; name?: string; department?: string }> {
   try {
-    const e = await request<{ serial: string; active: boolean }>('GET', `/api/employees/${encodeURIComponent(serial)}`);
-    return { exists: true, active: e.active };
+    const e = await request<{ serial: string; active: boolean; employeeNo?: string; name?: string; department?: string }>('GET', `/api/employees/${encodeURIComponent(serial)}`);
+    return { exists: true, active: e.active, employeeNo: e.employeeNo, name: e.name, department: e.department };
   } catch (err) {
     if (err instanceof ApiError && err.code === 'NOT_FOUND') return { exists: false, active: false };
     throw err;

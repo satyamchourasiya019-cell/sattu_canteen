@@ -81,14 +81,26 @@ export interface SerialCheck {
   reason: 'not_found' | 'inactive' | 'db' | null;
 }
 
-/** Public single-serial check (used during employee registration). */
+export interface SerialCheck {
+  ok: boolean;
+  reason: 'not_found' | 'inactive' | 'db' | null;
+  /** Full master data (empty strings when the doc has none). */
+  employeeNo?: string;
+  name?: string;
+  department?: string;
+}
+
+/**
+ * Public single-serial check (used during employee registration and scans).
+ * In both modes this reads ONE employee doc only — never the list.
+ */
 export async function checkSerial(serial: string): Promise<SerialCheck> {
   if (BACKEND_MODE === 'local') {
     try {
       const r = await api.apiGetEmployee(serial);
       if (!r.exists) return { ok: false, reason: 'not_found' };
       if (!r.active) return { ok: false, reason: 'inactive' };
-      return { ok: true, reason: null };
+      return { ok: true, reason: null, employeeNo: (r as { employeeNo?: string }).employeeNo ?? '', name: (r as { name?: string }).name ?? '', department: (r as { department?: string }).department ?? '' };
     } catch {
       return { ok: false, reason: 'db' };
     }
@@ -99,7 +111,13 @@ export async function checkSerial(serial: string): Promise<SerialCheck> {
     if (!snap.exists()) return { ok: false, reason: 'not_found' };
     const data = snap.data() as Record<string, unknown>;
     if (data.active === false) return { ok: false, reason: 'inactive' };
-    return { ok: true, reason: null };
+    return {
+      ok: true,
+      reason: null,
+      employeeNo: typeof data.employeeNo === 'string' ? data.employeeNo : '',
+      name: typeof data.name === 'string' ? data.name : '',
+      department: typeof data.department === 'string' ? data.department : '',
+    };
   } catch {
     return { ok: false, reason: 'db' };
   }
