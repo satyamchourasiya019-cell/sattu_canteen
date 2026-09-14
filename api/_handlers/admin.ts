@@ -11,7 +11,7 @@ import {
   type SettingsRecord,
   type TransactionRecord,
   type SessionRecord,
-} from './lib/store';
+} from '../_lib/store';
 import {
   createSession,
   getAdminSession,
@@ -24,7 +24,7 @@ import {
   canonicalSerial,
   mealSlot,
   minutesOf,
-} from './lib/util';
+} from '../_lib/util';
 
 interface UserRecord {
   uid: string;

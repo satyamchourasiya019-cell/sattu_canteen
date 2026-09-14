@@ -76,7 +76,7 @@ async function request<T>(method: string, path: string, body?: unknown, opts?: {
 // ---------------------------------------------------------------- auth ---
 export async function apiLogin(email: string, password: string): Promise<AdminUser> {
   try {
-    const res = await request<{ token: string; user: AdminUser }>('POST', '/api/auth/login', { email, password });
+    const res = await request<{ token: string; user: AdminUser }>('POST', '/api/auth-login', { email, password });
     localStorage.setItem(ADMIN_TOKEN_KEY, res.token);
     return res.user;
   } catch (err) {
@@ -87,7 +87,7 @@ export async function apiLogin(email: string, password: string): Promise<AdminUs
 
 export async function apiLogout(): Promise<void> {
   try {
-    await request('POST', '/api/auth/logout');
+    await request('POST', '/api/auth-logout');
   } finally {
     localStorage.removeItem(ADMIN_TOKEN_KEY);
   }
@@ -97,7 +97,7 @@ export async function apiFetchSession(): Promise<AdminUser | null> {
   const t = localStorage.getItem(ADMIN_TOKEN_KEY);
   if (!t) return null;
   try {
-    return await request<AdminUser | null>('GET', '/api/auth/me');
+    return await request<AdminUser | null>('GET', '/api/auth-me');
   } catch {
     localStorage.removeItem(ADMIN_TOKEN_KEY);
     return null;
@@ -157,7 +157,7 @@ export interface RegisterInput {
 }
 
 export async function apiEmployeeRegister(input: RegisterInput): Promise<{ token: string; employee: Employee }> {
-  const res = await request<{ token: string; employee: Employee }>('POST', '/api/employee/register', input, { employee: true });
+  const res = await request<{ token: string; employee: Employee }>('POST', '/api/employee-register', input, { employee: true });
   storeEmployeeToken(res.token);
   storeEmployeeSerial(res.employee.serial);
   return res;
@@ -166,7 +166,7 @@ export async function apiEmployeeRegister(input: RegisterInput): Promise<{ token
 export async function apiEmployeeMe(): Promise<Employee | null> {
   if (!storedEmployeeToken()) return null;
   try {
-    const me = await request<Employee>('GET', '/api/employee/me', undefined, { employee: true });
+    const me = await request<Employee>('GET', '/api/employee-me', undefined, { employee: true });
     storeEmployeeSerial(me.serial);
     return me;
   } catch {
@@ -178,18 +178,18 @@ export async function apiEmployeeMe(): Promise<Employee | null> {
 
 export async function apiEmployeeLogout(): Promise<void> {
   try {
-    await request('POST', '/api/employee/logout', undefined, { employee: true });
+    await request('POST', '/api/employee-logout', undefined, { employee: true });
   } finally {
     storeEmployeeToken(null);
   }
 }
 
 export async function apiScanContext(qrType: 'breakfastSnacks' | 'lunchDinner'): Promise<ScanContext> {
-  return request<ScanContext>('GET', `/api/scan/context?qr=${qrType}`, undefined, { employee: true });
+  return request<ScanContext>('GET', `/api/scan-context?qr=${qrType}`, undefined, { employee: true });
 }
 
 export async function apiScanConfirm(meal: string, addonIds: string[]): Promise<ConfirmScanResult> {
-  return request<ConfirmScanResult>('POST', '/api/scan/confirm', { meal, addonIds }, { employee: true });
+  return request<ConfirmScanResult>('POST', '/api/scan-confirm', { meal, addonIds }, { employee: true });
 }
 
 // ---------------------------------------------------------- employees ----
@@ -200,7 +200,7 @@ export async function apiListEmployees(): Promise<Employee[]> {
 
 export async function apiGetEmployee(serial: string): Promise<{ exists: boolean; active: boolean; employeeNo?: string; name?: string; department?: string }> {
   try {
-    const e = await request<{ serial: string; active: boolean; employeeNo?: string; name?: string; department?: string }>('GET', `/api/employees/${encodeURIComponent(serial)}`);
+    const e = await request<{ serial: string; active: boolean; employeeNo?: string; name?: string; department?: string }>('GET', `/api/employee?serial=${encodeURIComponent(serial)}`);
     return { exists: true, active: e.active, employeeNo: e.employeeNo, name: e.name, department: e.department };
   } catch (err) {
     if (err instanceof ApiError && err.code === 'NOT_FOUND') return { exists: false, active: false };
@@ -209,15 +209,15 @@ export async function apiGetEmployee(serial: string): Promise<{ exists: boolean;
 }
 
 export async function apiSaveEmployee(serial: string, data: Partial<Employee>): Promise<void> {
-  await request('PUT', `/api/employees/${encodeURIComponent(serial)}`, data);
+  await request('POST', '/api/employee-save', { serial, ...data });
 }
 
 export async function apiDeleteEmployee(serial: string): Promise<void> {
-  await request('DELETE', `/api/employees/${encodeURIComponent(serial)}`);
+  await request('POST', '/api/employee-delete', { serial });
 }
 
 export async function apiBulkEmployees(count: number): Promise<number> {
-  const res = await request<{ added: number }>('POST', '/api/employees/bulk', { count });
+  const res = await request<{ added: number }>('POST', '/api/employees-bulk', { count });
   return res.added;
 }
 
@@ -228,15 +228,15 @@ export async function apiListMealItems(): Promise<MealItem[]> {
 }
 
 export async function apiCreateMealItem(item: { id?: string; name: string; price: number; enabled?: boolean }): Promise<void> {
-  await request('POST', '/api/meal-items', item);
+  await request('POST', '/api/meal-item-create', item);
 }
 
 export async function apiSaveMealItem(item: MealItem): Promise<void> {
-  await request('PUT', `/api/meal-items/${item.id}`, { name: item.name, price: item.price, enabled: item.enabled });
+  await request('POST', '/api/meal-item-save', { id: item.id, name: item.name, price: item.price, enabled: item.enabled });
 }
 
 export async function apiDeleteMealItem(id: string): Promise<void> {
-  await request('DELETE', `/api/meal-items/${id}`);
+  await request('POST', '/api/meal-item-delete', { id });
 }
 
 // ------------------------------------------------------------- settings ---
@@ -245,7 +245,7 @@ export async function apiGetSettings(): Promise<CanteenSettings> {
 }
 
 export async function apiSaveSettings(changes: Partial<CanteenSettings>): Promise<void> {
-  await request('PUT', '/api/settings', changes);
+  await request('POST', '/api/settings-save', changes);
 }
 
 // -------------------------------------------------------- transactions ---
@@ -269,7 +269,7 @@ export async function apiManualEntry(input: { serial: string; meal: string; addo
 }
 
 export async function apiDeleteTransaction(id: string): Promise<void> {
-  await request('DELETE', `/api/transactions/${encodeURIComponent(id)}`);
+  await request('POST', '/api/transaction-delete', { id });
 }
 
 export async function apiCleanupOldTransactions(cutoff: string): Promise<number> {

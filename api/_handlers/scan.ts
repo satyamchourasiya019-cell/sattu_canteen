@@ -7,7 +7,7 @@ import {
   type MealItemRecord,
   type SettingsRecord,
   type TransactionRecord,
-} from './lib/store';
+} from '../_lib/store';
 import {
   createEmployeeSession,
   detectMeal,
@@ -19,7 +19,7 @@ import {
   toDateString,
   toTimeString,
   canonicalSerial,
-} from './lib/util';
+} from '../_lib/util';
 
 interface EmployeeSessionPayload {
   token: string;
@@ -117,7 +117,7 @@ export async function employeeMe(req: VercelRequest, res: VercelResponse): Promi
 
 /** POST /api/employee/logout */
 export async function employeeLogout(req: VercelRequest, res: VercelResponse): Promise<void> {
-  const { dropEmployeeSession } = await import('./lib/util');
+  const { dropEmployeeSession } = await import('../_lib/util');
   await dropEmployeeSession(req);
   json(res, 200, { ok: true });
 }

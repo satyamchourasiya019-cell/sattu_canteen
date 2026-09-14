@@ -378,6 +378,14 @@ route('POST', /^\/api\/employee\/register$/, async (req, res) => {
   if (existing && existing.active === false) {
     return json(res, 400, { error: 'SERIAL_INACTIVE', message: 'This serial number is inactive. Please contact the canteen supervisor.' });
   }
+  // One employee per serial: a claimed serial (has a name) can never be
+  // registered by a different person. Same name = the same employee logging in.
+  if (existing && existing.name && existing.name !== name) {
+    return json(res, 409, {
+      error: 'SERIAL_TAKEN',
+      message: `Serial ${serial} is already registered to ${existing.name}. One serial number can be used by only one employee. If this is your serial, please just log in with your own name, or contact the canteen supervisor.`,
+    });
+  }
   if (employeeNoTaken(employeeNo, serial)) {
     return json(res, 400, { error: 'VALIDATION', fieldErrors: { employeeNo: 'This employee number is already used by another serial.' } });
   }
@@ -815,19 +823,55 @@ route('GET', /^\/api\/events$/, async (req, res) => {
 });
 
 // ------------------------------------------------------------ server ---
+/**
+ * Canonical single-segment endpoint → internal REST form.
+ * The cloud API (Vercel) only guarantees single-segment /api/<name> routes,
+ * so the client speaks that dialect everywhere; the demo server accepts it too.
+ */
+function normalizeRequest(req, body) {
+  let method = req.method;
+  let urlPath = new URL(req.url || '/', 'http://x').pathname;
+  const canonical = [
+    { path: '/api/auth-login', to: '/api/auth/login' },
+    { path: '/api/auth-logout', to: '/api/auth/logout' },
+    { path: '/api/auth-me', to: '/api/auth/me' },
+    { path: '/api/employee-register', to: '/api/employee/register' },
+    { path: '/api/employee-me', to: '/api/employee/me' },
+    { path: '/api/employee-logout', to: '/api/employee/logout' },
+    { path: '/api/scan-context', to: '/api/scan/context' },
+    { path: '/api/scan-confirm', to: '/api/scan/confirm' },
+    { path: '/api/employees-bulk', to: '/api/employees/bulk' },
+    { path: '/api/employee', to: () => `/api/employees/${encodeURIComponent(String(req.query.serial ?? ''))}` },
+    { path: '/api/employee-save', to: () => `/api/employees/${encodeURIComponent(String(body.serial ?? ''))}`, method: 'PUT' },
+    { path: '/api/employee-delete', to: () => `/api/employees/${encodeURIComponent(String(body.serial ?? ''))}`, method: 'DELETE' },
+    { path: '/api/meal-item-create', to: '/api/meal-items' },
+    { path: '/api/meal-item-save', to: () => `/api/meal-items/${encodeURIComponent(String(body.id ?? ''))}`, method: 'PUT' },
+    { path: '/api/meal-item-delete', to: () => `/api/meal-items/${encodeURIComponent(String(body.id ?? ''))}`, method: 'DELETE' },
+    { path: '/api/settings-save', to: '/api/settings', method: 'PUT' },
+    { path: '/api/transaction-delete', to: () => `/api/transactions/${encodeURIComponent(String(body.id ?? ''))}`, method: 'DELETE' },
+  ];
+  for (const c of canonical) {
+    if (urlPath === c.path) {
+      urlPath = typeof c.to === 'function' ? c.to() : c.to;
+      if (c.method) method = c.method;
+      break;
+    }
+  }
+  return { method, urlPath };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://x');
-  const urlPath = url.pathname;
   req.query = Object.fromEntries(url.searchParams);
-  for (const { method, pattern, handler } of routes) {
-    if (req.method !== method) continue;
+  let body = {};
+  if (['POST', 'PUT', 'PATCH'].includes(req.method)) body = (await readBody(req)) || {};
+  Object.defineProperty(req, 'body', { value: body, configurable: true });
+  const { method, urlPath } = normalizeRequest(req, body);
+  for (const { method: rMethod, pattern, handler } of routes) {
+    if (method !== rMethod) continue;
     const m = urlPath.match(pattern);
     if (!m) continue;
     try {
-      let body = {};
-      if (['POST', 'PUT', 'PATCH'].includes(req.method)) body = await readBody(req);
-      body = body || {};
-      Object.defineProperty(req, 'body', { value: body, configurable: true });
       const session = getSession(req);
       await handler(req, res, m, body, session);
     } catch (err) {
