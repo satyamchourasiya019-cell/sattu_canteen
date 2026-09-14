@@ -52,6 +52,13 @@ async function request<T>(method: string, path: string, body?: unknown, opts?: {
   if (t) headers.Authorization = `Bearer ${t}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  // Hosted static deployments have no demo backend: /api/* is answered by the
+  // SPA fallback (HTML with 200). Detect that and fail cleanly instead of
+  // feeding null data into the UI (which used to crash the app).
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    throw new ApiError('BACKEND_UNAVAILABLE', 'The data backend is not available on this hosted site. Run the app on the office computer, or complete the Firebase setup.');
+  }
   let data: unknown = null;
   try {
     data = await res.json();
