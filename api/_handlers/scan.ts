@@ -95,6 +95,10 @@ export async function employeeRegister(req: VercelRequest, res: VercelResponse):
     : { employeeNo, name, department, active: true, createdAt: now, updatedAt: now };
 
   await setJSON(keys.employee(serial), record);
+  // Keep the admin employee list in sync with self-registrations.
+  const listIndex = (await getJSON<Record<string, EmployeeRecord>>(keys.employeesIndex)) ?? {};
+  listIndex[serial] = record;
+  await setJSON(keys.employeesIndex, listIndex);
   if (employeeNo) {
     const index = (await getJSON<Record<string, string>>(keys.employeeNoIndex)) ?? {};
     if (!index[employeeNo]) {

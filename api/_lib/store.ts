@@ -45,6 +45,50 @@ export async function del(key: string): Promise<void> {
   await redis(['DEL', key]);
 }
 
+/**
+ * Execute many Redis commands in one REST roundtrip (Upstash pipeline).
+ * Critical for list endpoints: a day with hundreds of transactions must not
+ * pay one HTTP roundtrip per record.
+ */
+export async function pipeline(commands: (string | number)[][]): Promise<unknown[]> {
+  const res = await fetch(REST_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${REST_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(commands),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    throw new Error(`redis pipeline ${res.status}`);
+  }
+  const data = (await res.json()) as { result: unknown[] };
+  return data.result;
+}
+
+/** GET many keys in batched pipelines, preserving order. Null for missing keys. */
+export async function getMany<T>(keysToGet: string[]): Promise<(T | null)[]> {
+  const out: (T | null)[] = [];
+  const CHUNK = 50;
+  for (let i = 0; i < keysToGet.length; i += CHUNK) {
+    const chunk = keysToGet.slice(i, i + CHUNK);
+    const results = await pipeline(chunk.map((k) => ['GET', k]));
+    for (const raw of results) {
+      if (raw === null || raw === undefined) {
+        out.push(null);
+        continue;
+      }
+      try {
+        out.push(JSON.parse(String(raw)) as T);
+      } catch {
+        out.push(null);
+      }
+    }
+  }
+  return out;
+}
+
 /** Atomic check-and-set using a WATCH-free optimistic loop via GET then SET with NX semantics handled by caller. */
 export async function setIfAbsent(key: string, value: unknown): Promise<boolean> {
   const result = (await redis(['SET', key, JSON.stringify(value), 'NX'])) as unknown;
@@ -172,6 +216,7 @@ export const keys = {
   sessions: 'sessions', // hash field = token
   employeeSessions: 'employeeSessions',
   employee: (serial: string) => `employee:${serial}`,
+  employeesIndex: 'employees:index', // map serial -> record (admin list)
   employeeNoIndex: 'employeeNoIndex', // hash field = employeeNo -> serial
   transaction: (id: string) => `txn:${id}`,
   txnByDate: (date: string) => `txns:date:${date}`, // set of txn ids

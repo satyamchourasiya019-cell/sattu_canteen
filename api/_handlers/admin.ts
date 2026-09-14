@@ -4,6 +4,7 @@ import {
   getJSON,
   setJSON,
   del,
+  getMany,
   keys,
   ensureSeeded,
   type EmployeeRecord,
@@ -268,11 +269,9 @@ export async function listTransactions(req: VercelRequest, res: VercelResponse):
   const from = (req.query.from as string) || todayLocal();
   const to = (req.query.to as string) || from;
   const ids = await txnIdsForRange(from, to);
-  const txns: TransactionRecord[] = [];
-  for (const id of ids) {
-    const t = await getJSON<TransactionRecord>(keys.transaction(id));
-    if (t) txns.push(t);
-  }
+  // One pipelined fetch instead of one Redis roundtrip per record.
+  const records = await getMany<TransactionRecord>(ids.map((id) => keys.transaction(id)));
+  const txns = records.filter((t): t is TransactionRecord => t !== null);
   txns.sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
   json(res, 200, { transactions: txns });
 }
@@ -282,6 +281,13 @@ export async function listDailyEntries(req: VercelRequest, res: VercelResponse):
   const from = (req.query.from as string) || todayLocal();
   const to = (req.query.to as string) || from;
   const ids = await txnIdsForRange(from, to);
+  const records = await getMany<TransactionRecord>(ids.map((id) => keys.transaction(id)));
+  const txns = records.filter((t): t is TransactionRecord => t !== null);
+  // Batch employee lookups so live master data needs one pipeline, not N.
+  const serials = [...new Set(txns.map((t) => t.serial))];
+  const emps = await getMany<EmployeeRecord>(serials.map((s) => keys.employee(s)));
+  const empBySerial = new Map<string, EmployeeRecord | null>();
+  serials.forEach((s, i) => empBySerial.set(s, emps[i]));
   const bySerial = new Map<string, Record<string, unknown>>();
   for (const id of ids) {
     const t = await getJSON<TransactionRecord>(keys.transaction(id));
@@ -310,7 +316,7 @@ export async function listDailyEntries(req: VercelRequest, res: VercelResponse):
     e.total += t.amount;
     if (t.time > e.lastTime) e.lastTime = t.time;
     // Live master data for renamed employees.
-    const emp = await getJSON<EmployeeRecord>(keys.employee(t.serial));
+    const emp = empBySerial.get(t.serial);
     if (emp) {
       e.employeeNo = emp.employeeNo || e.employeeNo;
       e.name = emp.name || e.name;
