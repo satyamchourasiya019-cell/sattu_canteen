@@ -35,7 +35,7 @@ function toEmployee(serial: string, data: Record<string, unknown>): Employee {
 
 /** Realtime list of all employees (admin only). */
 export function subscribeEmployees(cb: (list: Employee[]) => void, onError?: (msg: string) => void): () => void {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     const refresh = async () => {
       try {
         cb(await api.apiListEmployees());
@@ -67,7 +67,7 @@ export function subscribeEmployees(cb: (list: Employee[]) => void, onError?: (ms
 
 /** One-time fetch (admin / reports). */
 export async function fetchEmployees(): Promise<Employee[]> {
-  if (BACKEND_MODE === 'local') return api.apiListEmployees();
+  if (BACKEND_MODE !== 'firebase') return api.apiListEmployees();
   const db = requireDb();
   const snap = await getDocs(collection(db, COLLECTION));
   const list: Employee[] = [];
@@ -95,7 +95,7 @@ export interface SerialCheck {
  * In both modes this reads ONE employee doc only — never the list.
  */
 export async function checkSerial(serial: string): Promise<SerialCheck> {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     try {
       const r = await api.apiGetEmployee(serial);
       if (!r.exists) return { ok: false, reason: 'not_found' };
@@ -125,7 +125,7 @@ export async function checkSerial(serial: string): Promise<SerialCheck> {
 
 /** Create or update an employee (admin). */
 export async function saveEmployee(serial: string, data: Partial<Employee>): Promise<void> {
-  if (BACKEND_MODE === 'local') return api.apiSaveEmployee(serial, data);
+  if (BACKEND_MODE !== 'firebase') return api.apiSaveEmployee(serial, data);
   const db = requireDb();
   await setDoc(
     doc(db, COLLECTION, serial),
@@ -135,13 +135,13 @@ export async function saveEmployee(serial: string, data: Partial<Employee>): Pro
 }
 
 export async function deleteEmployee(serial: string): Promise<void> {
-  if (BACKEND_MODE === 'local') return api.apiDeleteEmployee(serial);
+  if (BACKEND_MODE !== 'firebase') return api.apiDeleteEmployee(serial);
   const db = requireDb();
   await deleteDoc(doc(db, COLLECTION, serial));
 }
 
 export async function bulkCreateSerials(count: number): Promise<number> {
-  if (BACKEND_MODE === 'local') return api.apiBulkEmployees(count);
+  if (BACKEND_MODE !== 'firebase') return api.apiBulkEmployees(count);
   const db = requireDb();
   const pad = Math.min(6, Math.max(3, String(count).length + 1));
   let added = 0;

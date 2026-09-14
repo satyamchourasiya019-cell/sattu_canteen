@@ -13,6 +13,7 @@ import type {
   ScanContext,
   Transaction,
 } from '../types';
+import { BACKEND_MODE } from '../firebase/config';
 
 export class ApiError extends Error {
   code: string;
@@ -106,9 +107,21 @@ export async function apiFetchSession(): Promise<AdminUser | null> {
 // ------------------------------------------------------------ realtime ---
 type Listener = (event: string) => void;
 let es: EventSource | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 const listeners = new Set<Listener>();
 
-function ensureEventSource(): void {
+function notifyAll(): void {
+  // Cloud mode has no SSE stream: refresh all subscribed feeds on a short
+  // interval. Each hook re-fetches only its own entity, so this stays cheap.
+  listeners.forEach((l) => l('*'));
+}
+
+function ensureRealtime(): void {
+  if (BACKEND_MODE === 'cloud') {
+    // Serverless functions cannot hold SSE connections — poll instead.
+    if (!pollTimer) pollTimer = setInterval(notifyAll, 5000);
+    return;
+  }
   if (es) return;
   es = new EventSource('/api/events');
   es.onerror = () => {
@@ -121,12 +134,18 @@ function ensureEventSource(): void {
 }
 
 export function apiSubscribe(entity: 'transactions' | 'employees' | 'mealItems' | 'settings', cb: () => void): () => void {
-  ensureEventSource();
+  ensureRealtime();
   const l: Listener = (name) => {
-    if (name === entity) cb();
+    if (name === entity || name === '*') cb();
   };
   listeners.add(l);
-  return () => listeners.delete(l);
+  return () => {
+    listeners.delete(l);
+    if (listeners.size === 0 && pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  };
 }
 
 // ------------------------------------------------- employee self-service ---

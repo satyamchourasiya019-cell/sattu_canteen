@@ -24,7 +24,7 @@ function toMealItem(id: string, data: Record<string, unknown>): MealItem {
 
 /** Public menu subscription (employee scan flow + admin management). */
 export function subscribeMealItems(cb: (items: MealItem[]) => void, onError?: (msg: string) => void): () => void {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     const refresh = async () => {
       try {
         cb(await api.apiListMealItems());
@@ -56,7 +56,7 @@ export function subscribeMealItems(cb: (items: MealItem[]) => void, onError?: (m
 
 /** One-time fetch (admin). */
 export async function fetchMealItems(): Promise<MealItem[]> {
-  if (BACKEND_MODE === 'local') return api.apiListMealItems();
+  if (BACKEND_MODE !== 'firebase') return api.apiListMealItems();
   const db = requireDb();
   const snap = await getDocs(collection(db, COLLECTION));
   const items: MealItem[] = [];
@@ -66,7 +66,7 @@ export async function fetchMealItems(): Promise<MealItem[]> {
 }
 
 export async function createMealItem(item: { id?: string; name: string; price: number; enabled?: boolean }): Promise<void> {
-  if (BACKEND_MODE === 'local') return api.apiCreateMealItem(item);
+  if (BACKEND_MODE !== 'firebase') return api.apiCreateMealItem(item);
   const db = requireDb();
   const id = (item.id || item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')).slice(0, 30) || `item-${Date.now()}`;
   await setDoc(doc(db, COLLECTION, id), {
@@ -78,7 +78,7 @@ export async function createMealItem(item: { id?: string; name: string; price: n
 }
 
 export async function saveMealItem(item: MealItem): Promise<void> {
-  if (BACKEND_MODE === 'local') return api.apiSaveMealItem(item);
+  if (BACKEND_MODE !== 'firebase') return api.apiSaveMealItem(item);
   const db = requireDb();
   await updateDoc(doc(db, COLLECTION, item.id), {
     name: item.name.trim().slice(0, 40),
@@ -89,7 +89,7 @@ export async function saveMealItem(item: MealItem): Promise<void> {
 }
 
 export async function deleteMealItem(id: string): Promise<void> {
-  if (BACKEND_MODE === 'local') return api.apiDeleteMealItem(id);
+  if (BACKEND_MODE !== 'firebase') return api.apiDeleteMealItem(id);
   const db = requireDb();
   await deleteDoc(doc(db, COLLECTION, id));
 }

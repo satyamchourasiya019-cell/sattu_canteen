@@ -49,7 +49,7 @@ export function currentEmployeeSerial(): string | null {
 
 export function clearEmployeeIdentity(): void {
   api.storeEmployeeSerial(null);
-  if (BACKEND_MODE === 'local') void api.apiEmployeeLogout();
+  void api.apiEmployeeLogout().catch(() => undefined);
 }
 
 function todayTxnId(date: string, serial: string, meal: string): string {
@@ -57,7 +57,7 @@ function todayTxnId(date: string, serial: string, meal: string): string {
 }
 
 export async function getScanContext(qrType: ScanContext['qrType']): Promise<ScanContext> {
-  if (BACKEND_MODE === 'local') return api.apiScanContext(qrType);
+  if (BACKEND_MODE !== 'firebase') return api.apiScanContext(qrType);
 
   const serial = api.storedEmployeeSerial();
   if (!serial) throw new Error('UNAUTHENTICATED');
@@ -96,7 +96,7 @@ export async function getScanContext(qrType: ScanContext['qrType']): Promise<Sca
 }
 
 export async function confirmScan(meal: string, addonIds: string[]): Promise<ConfirmScanResult> {
-  if (BACKEND_MODE === 'local') return api.apiScanConfirm(meal, addonIds);
+  if (BACKEND_MODE !== 'firebase') return api.apiScanConfirm(meal, addonIds);
 
   const serial = api.storedEmployeeSerial();
   if (!serial) throw new Error('UNAUTHENTICATED');

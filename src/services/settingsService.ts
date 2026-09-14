@@ -43,7 +43,7 @@ function toSettings(data: Record<string, unknown> | undefined): CanteenSettings 
 }
 
 export function subscribeSettings(cb: (s: CanteenSettings) => void, onError?: (msg: string) => void): () => void {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     const refresh = async () => {
       try {
         cb(await api.apiGetSettings());
@@ -69,20 +69,20 @@ export function subscribeSettings(cb: (s: CanteenSettings) => void, onError?: (m
 }
 
 export async function fetchSettings(): Promise<CanteenSettings> {
-  if (BACKEND_MODE === 'local') return api.apiGetSettings();
+  if (BACKEND_MODE !== 'firebase') return api.apiGetSettings();
   const db = requireDb();
   const snap = await getDoc(doc(db, DOC_PATH));
   return toSettings(snap.data() as Record<string, unknown> | undefined);
 }
 
 export async function saveSettings(changes: Partial<CanteenSettings>): Promise<void> {
-  if (BACKEND_MODE === 'local') return api.apiSaveSettings(changes);
+  if (BACKEND_MODE !== 'firebase') return api.apiSaveSettings(changes);
   const db = requireDb();
   await setDoc(doc(db, DOC_PATH), { ...changes, updatedAt: Date.now() }, { merge: true });
 }
 
 export async function markCleanupDone(atMs: number, deletedCount: number): Promise<void> {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     void deletedCount;
     void atMs;
     return; // the demo server stamps lastCleanupAt during /api/cleanup

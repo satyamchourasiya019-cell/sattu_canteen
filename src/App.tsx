@@ -29,21 +29,16 @@ function RequireAdmin({ children }: { children: JSX.Element }): JSX.Element | nu
 }
 
 export default function App(): JSX.Element {
-  const isDemo = BACKEND_MODE === 'local';
+  // The demo banner only belongs to localhost development with the bundled
+  // backend. The deployed cloud app (serverless API + Upstash) is fully real.
+  const isLocalDev = BACKEND_MODE === 'local';
   return (
     <>
-      {isDemo && (
+      {isLocalDev && (
         <div className="banner banner-info setup-banner">
           <strong>Local demo mode</strong> — data is stored on this machine (data/db.json), everything works
           including realtime. For production, add the VITE_FIREBASE_* variables to <code>.env</code>
           (see <code>.env.example</code>) and the same app switches to Firebase.
-        </div>
-      )}
-      {isDemo && typeof window !== 'undefined' && !window.location.hostname.startsWith('localhost') && (
-        <div className="banner banner-warn setup-banner">
-          <strong>Demo frontend only</strong> — this hosted site has no connected backend, so orders cannot be
-          saved. Run the app on the office computer with <code>Start-Canteen-App.bat</code> for full
-          functionality, or add Firebase credentials for a permanent cloud setup.
         </div>
       )}
       <Routes>

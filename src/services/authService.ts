@@ -30,7 +30,7 @@ async function loadProfile(user: User): Promise<AdminUser | null> {
 }
 
 export function watchAdminAuth(cb: (user: AdminUser | null, loading: boolean) => void): () => void {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     cb(null, true);
     api
       .apiFetchSession()
@@ -64,7 +64,7 @@ export function watchAdminAuth(cb: (user: AdminUser | null, loading: boolean) =>
 }
 
 export async function adminSignIn(email: string, password: string): Promise<AdminUser> {
-  if (BACKEND_MODE === 'local') return api.apiLogin(email, password);
+  if (BACKEND_MODE !== 'firebase') return api.apiLogin(email, password);
   const auth = requireAuth();
   await setPersistence(auth, browserLocalPersistence);
   try {
@@ -92,7 +92,7 @@ export async function adminSignIn(email: string, password: string): Promise<Admi
 }
 
 export async function adminSignOut(): Promise<void> {
-  if (BACKEND_MODE === 'local') return api.apiLogout();
+  if (BACKEND_MODE !== 'firebase') return api.apiLogout();
   const auth = requireAuth();
   await signOut(auth);
 }
@@ -106,7 +106,7 @@ export async function bootstrapAdmin(email: string, password: string, role: Admi
 }
 
 export async function sendReset(email: string): Promise<void> {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     throw new AppError('NO_RESET', 'Password reset email is not available in local demo mode. Use one of the demo accounts shown on the login page.');
   }
   const auth = requireAuth();

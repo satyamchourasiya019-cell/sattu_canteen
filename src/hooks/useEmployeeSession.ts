@@ -20,7 +20,7 @@ export function useEmployeeSession() {
 
   useEffect(() => {
     let alive = true;
-    if (BACKEND_MODE === 'local') {
+    if (BACKEND_MODE !== 'firebase') {
       api
         .apiEmployeeMe()
         .then((e) => {
@@ -70,7 +70,7 @@ export function useEmployeeSession() {
 
   const login = useCallback(
     async (input: { serial: string; employeeNo: string; name: string; department: string }) => {
-      if (BACKEND_MODE === 'local') {
+      if (BACKEND_MODE !== 'firebase') {
         const res = await api.apiEmployeeRegister(input);
         setEmployee(res.employee);
         return res.employee;
@@ -118,7 +118,7 @@ export function useEmployeeSession() {
   );
 
   const logout = useCallback(async () => {
-    if (BACKEND_MODE === 'local') await api.apiEmployeeLogout();
+    if (BACKEND_MODE !== 'firebase') await api.apiEmployeeLogout();
     api.storeEmployeeSerial(null);
     setEmployee(null);
   }, []);

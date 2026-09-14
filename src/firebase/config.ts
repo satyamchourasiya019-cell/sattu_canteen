@@ -32,12 +32,19 @@ export const firebaseEnvStatus: FirebaseEnvStatus = {
 };
 
 /**
- * 'firebase' - env vars present, use Firebase Auth + Firestore.
- * 'local'    - no env vars; use the bundled zero-dependency demo backend
- *              (server/demo-server.mjs, proxied under /api) so the whole
- *              app is fully functional locally before Firebase is set up.
+ * 'firebase' - Firebase env vars present: Auth + Firestore.
+ * 'cloud'    - deployed with the serverless API + Upstash Redis backend
+ *              (production hostname, no Firebase vars).
+ * 'local'    - development: bundled zero-dependency demo backend
+ *              (server/demo-server.mjs, proxied under /api).
  */
-export const BACKEND_MODE: 'firebase' | 'local' = firebaseEnvStatus.configured ? 'firebase' : 'local';
+const isProdHost = typeof window !== 'undefined' && !window.location.hostname.startsWith('localhost') && window.location.hostname !== '127.0.0.1';
+
+export const BACKEND_MODE: 'firebase' | 'cloud' | 'local' = firebaseEnvStatus.configured
+  ? 'firebase'
+  : isProdHost
+    ? 'cloud'
+    : 'local';
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;

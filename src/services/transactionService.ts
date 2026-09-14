@@ -50,7 +50,7 @@ export function subscribeTransactionsByDate(
   cb: (txns: Transaction[]) => void,
   onError?: (msg: string) => void,
 ): () => void {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     let list: Transaction[] = [];
     const refresh = async () => {
       try {
@@ -97,7 +97,7 @@ export function subscribeTransactionsRange(
   cb: (txns: Transaction[]) => void,
   onError?: (msg: string) => void,
 ): () => void {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     let list: Transaction[] = [];
     const refresh = async () => {
       try {
@@ -138,7 +138,7 @@ export function subscribeTransactionsRange(
 
 /** One-time fetch for reports (range, newest first). */
 export async function fetchTransactionsRange(from: string, to: string): Promise<Transaction[]> {
-  if (BACKEND_MODE === 'local') return api.apiListTransactions(from, to);
+  if (BACKEND_MODE !== 'firebase') return api.apiListTransactions(from, to);
   const db = requireDb();
   const q = query(collection(db, COLLECTION), where('date', '>=', from), where('date', '<=', to));
   const snap = await getDocs(q);
@@ -155,7 +155,7 @@ export function subscribeDailyEntries(
   cb: (entries: DailyEntry[]) => void,
   onError?: (msg: string) => void,
 ): () => void {
-  if (BACKEND_MODE === 'local') {
+  if (BACKEND_MODE !== 'firebase') {
     let list: DailyEntry[] = [];
     const refresh = async () => {
       try {
@@ -220,7 +220,7 @@ export async function createManualEntry(input: {
   meal: Transaction['meal'];
   addonIds?: string[];
 }): Promise<Transaction> {
-  if (BACKEND_MODE === 'local') return api.apiManualEntry(input);
+  if (BACKEND_MODE !== 'firebase') return api.apiManualEntry(input);
   const db = requireDb();
   const t = new Date();
   const date = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
@@ -247,13 +247,13 @@ export async function createManualEntry(input: {
 }
 
 export async function deleteTransaction(id: string): Promise<void> {
-  if (BACKEND_MODE === 'local') return api.apiDeleteTransaction(id);
+  if (BACKEND_MODE !== 'firebase') return api.apiDeleteTransaction(id);
   const db = requireDb();
   await deleteDoc(doc(db, COLLECTION, id));
 }
 
 export async function cleanupOldTransactions(cutoff: string): Promise<number> {
-  if (BACKEND_MODE === 'local') return api.apiCleanupOldTransactions(cutoff);
+  if (BACKEND_MODE !== 'firebase') return api.apiCleanupOldTransactions(cutoff);
   const db = requireDb();
   const q = query(collection(db, COLLECTION), where('date', '<', cutoff));
   const snap = await getDocs(q);
