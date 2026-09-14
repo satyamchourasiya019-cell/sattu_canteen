@@ -52,6 +52,8 @@ const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
 ];
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+  // The catch-all receives the full original path (e.g. /api/settings), so
+  // the same regexes as the demo server work unchanged.
   const path = (req.url || '/').split('?')[0];
   if (!cloudEnabled) {
     return json(res, 503, {

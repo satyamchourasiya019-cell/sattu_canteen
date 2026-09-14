@@ -10,7 +10,7 @@
     }
   ],
   "functions": {
-    "api/index.ts": {
+    "api/[...path].ts": {
       "maxDuration": 15
     }
   }
