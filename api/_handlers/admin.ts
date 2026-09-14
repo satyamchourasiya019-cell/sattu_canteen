@@ -134,6 +134,15 @@ export async function saveEmployee(req: VercelRequest, res: VercelResponse, seri
   json(res, 200, { serial, ...record });
 }
 
+/** GET /api/employees?serial=X — public single-serial check for registration/scan flows. */
+export async function getEmployeeQuery(req: VercelRequest, res: VercelResponse): Promise<void> {
+  const serial = String(req.query.serial ?? '').trim();
+  if (!serial) return json(res, 400, { error: 'SERIAL_REQUIRED' });
+  const e = await getJSON<EmployeeRecord>(keys.employee(serial));
+  if (!e) return json(res, 404, { error: 'NOT_FOUND' });
+  json(res, 200, { serial, name: e.name, employeeNo: e.employeeNo || '', department: e.department || '', active: e.active });
+}
+
 export async function deleteEmployee(req: VercelRequest, res: VercelResponse, serial: string): Promise<void> {
   if (!(await requireAdmin(req, res))) return;
   const existing = await getJSON<EmployeeRecord>(keys.employee(serial));

@@ -276,6 +276,12 @@ route('GET', /^\/api\/auth\/me$/, async (req, res, m, body, s) => {
 
 // ---- employees (admin CRUD) ----
 route('GET', /^\/api\/employees$/, async (req, res, m, body, s) => {
+  // Public single-serial check (?serial=X) used by registration + scan pre-check.
+  if (req.query.serial) {
+    const e = db.employees[String(req.query.serial)];
+    if (!e) return json(res, 404, { error: 'NOT_FOUND' });
+    return json(res, 200, { serial: String(req.query.serial), name: e.name, employeeNo: e.employeeNo || '', department: e.department || '', active: e.active });
+  }
   if (!s) return json(res, 401, { error: 'UNAUTHENTICATED' });
   const list = Object.entries(db.employees).map(([serial, e]) => ({ serial, ...e }));
   list.sort((a, b) => a.serial.localeCompare(b.serial, undefined, { numeric: true }));

@@ -4,67 +4,57 @@ import { cloudEnabled, ensureSeeded } from './_lib/store';
 import * as scan from './_handlers/scan';
 import * as admin from './_handlers/admin';
 
-type Handler = (req: VercelRequest, res: VercelResponse, m: RegExpMatchArray) => Promise<void> | void;
+type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
 
 /**
- * Shared API router. Every /api endpoint has its own top-level function file
- * (api/<name>.ts) that delegates here, so Vercel routes each path reliably.
- * All canonical endpoints are single-segment; legacy two-segment POST forms
- * are kept as aliases.
+ * Shared API router. Vercel's Hobby plan allows 12 serverless functions, so
+ * each top-level api/<file>.ts delegates here and dispatches on path.
+ * All endpoints are single-segment; action endpoints use POST bodies.
  */
 const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
-  // health
+  // basics (served by api/index.ts)
+  { method: 'GET', pattern: /^\/api$/, handler: (_req, res) => json(res, 200, { ok: true, mode: 'cloud', storage: cloudEnabled ? 'upstash' : 'not-configured' }) },
   { method: 'GET', pattern: /^\/api\/health$/, handler: (_req, res) => json(res, 200, { ok: true, mode: 'cloud', storage: cloudEnabled ? 'upstash' : 'not-configured', time: new Date().toISOString() }) },
+  { method: 'POST', pattern: /^\/api\/cleanup$/, handler: admin.cleanup },
+  { method: 'POST', pattern: /^\/api\/manual-entry$/, handler: admin.manualEntry },
+  { method: 'POST', pattern: /^\/api\/transaction-delete$/, handler: (req, res) => admin.deleteTransaction(req, res, idOf(req)) },
+  { method: 'POST', pattern: /^\/api\/employees-bulk$/, handler: admin.bulkEmployees },
 
-  // admin auth
+  // admin auth (served by api/auth.ts)
   { method: 'POST', pattern: /^\/api\/auth-login$/, handler: admin.login },
   { method: 'POST', pattern: /^\/api\/auth-logout$/, handler: admin.logout },
   { method: 'GET', pattern: /^\/api\/auth-me$/, handler: admin.me },
-  { method: 'POST', pattern: /^\/api\/auth\/login$/, handler: admin.login },
-  { method: 'POST', pattern: /^\/api\/auth\/logout$/, handler: admin.logout },
-  { method: 'GET', pattern: /^\/api\/auth\/me$/, handler: admin.me },
 
-  // employees (admin)
-  { method: 'GET', pattern: /^\/api\/employees$/, handler: admin.listEmployees },
-  { method: 'POST', pattern: /^\/api\/employees-bulk$/, handler: admin.bulkEmployees },
-  { method: 'POST', pattern: /^\/api\/employees\/bulk$/, handler: admin.bulkEmployees },
-  { method: 'GET', pattern: /^\/api\/employee$/, handler: (req, res) => admin.getEmployee(req, res, serialOf(req)) },
+  // employees (served by api/employees.ts) — with ?serial= it is the public
+  // single-serial check used by registration and the scan pre-check.
+  { method: 'GET', pattern: /^\/api\/employees$/, handler: (req, res) => (req.query.serial ? admin.getEmployeeQuery(req, res) : admin.listEmployees(req, res)) },
   { method: 'POST', pattern: /^\/api\/employee-save$/, handler: (req, res) => admin.saveEmployee(req, res, serialOf(req)) },
   { method: 'POST', pattern: /^\/api\/employee-delete$/, handler: (req, res) => admin.deleteEmployee(req, res, serialOf(req)) },
 
-  // employee self-service
+  // employee self-service (served by api/employee-session.ts)
   { method: 'POST', pattern: /^\/api\/employee-register$/, handler: scan.employeeRegister },
   { method: 'GET', pattern: /^\/api\/employee-me$/, handler: scan.employeeMe },
   { method: 'POST', pattern: /^\/api\/employee-logout$/, handler: scan.employeeLogout },
-  { method: 'POST', pattern: /^\/api\/employee\/register$/, handler: scan.employeeRegister },
-  { method: 'GET', pattern: /^\/api\/employee\/me$/, handler: scan.employeeMe },
-  { method: 'POST', pattern: /^\/api\/employee\/logout$/, handler: scan.employeeLogout },
 
-  // scan flow
+  // scan flow (served by api/scan.ts)
   { method: 'GET', pattern: /^\/api\/scan-context$/, handler: scan.scanContext },
   { method: 'POST', pattern: /^\/api\/scan-confirm$/, handler: scan.scanConfirm },
-  { method: 'GET', pattern: /^\/api\/scan\/context$/, handler: scan.scanContext },
-  { method: 'POST', pattern: /^\/api\/scan\/confirm$/, handler: scan.scanConfirm },
 
-  // meal items
+  // meal items (served by api/meal-items.ts)
   { method: 'GET', pattern: /^\/api\/meal-items$/, handler: admin.listMealItems },
   { method: 'POST', pattern: /^\/api\/meal-item-create$/, handler: admin.createMealItem },
   { method: 'POST', pattern: /^\/api\/meal-item-save$/, handler: (req, res) => admin.saveMealItem(req, res, idOf(req)) },
   { method: 'POST', pattern: /^\/api\/meal-item-delete$/, handler: (req, res) => admin.deleteMealItem(req, res, idOf(req)) },
-  { method: 'PUT', pattern: /^\/api\/meal-items\/([a-z0-9-]+)$/, handler: (req, res, m) => admin.saveMealItem(req, res, m[1]) },
-  { method: 'DELETE', pattern: /^\/api\/meal-items\/([a-z0-9-]+)$/, handler: (req, res, m) => admin.deleteMealItem(req, res, m[1]) },
 
-  // settings
+  // settings (served by api/settings.ts)
   { method: 'GET', pattern: /^\/api\/settings$/, handler: admin.getSettings },
   { method: 'POST', pattern: /^\/api\/settings-save$/, handler: admin.saveSettings },
-  { method: 'PUT', pattern: /^\/api\/settings$/, handler: admin.saveSettings },
 
-  // transactions & daily entries
+  // transactions (served by api/transactions.ts)
   { method: 'GET', pattern: /^\/api\/transactions$/, handler: admin.listTransactions },
+
+  // daily entries (served by api/daily-entries.ts)
   { method: 'GET', pattern: /^\/api\/daily-entries$/, handler: admin.listDailyEntries },
-  { method: 'POST', pattern: /^\/api\/manual-entry$/, handler: admin.manualEntry },
-  { method: 'POST', pattern: /^\/api\/transaction-delete$/, handler: (req, res) => admin.deleteTransaction(req, res, idOf(req)) },
-  { method: 'POST', pattern: /^\/api\/cleanup$/, handler: admin.cleanup },
 ];
 
 /** Serial from ?serial= or body.serial (trimmed). */
@@ -94,10 +84,9 @@ export default async function handle(req: VercelRequest, res: VercelResponse): P
   await ensureSeeded();
   for (const { method, pattern, handler } of routes) {
     if (req.method !== method) continue;
-    const m = path.match(pattern);
-    if (!m) continue;
+    if (!pattern.test(path)) continue;
     try {
-      await handler(req, res, m);
+      await handler(req, res);
     } catch (err) {
       console.error('[api] error:', err);
       if (!res.writableEnded) json(res, 500, { error: 'INTERNAL', message: 'Unexpected server error.' });
