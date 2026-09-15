@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useEmployeeList } from '../../hooks/useEmployees';
-import { bulkCreateSerials, deleteEmployee, saveEmployee, validateSerialInput } from '../../services/employeeService';
+import { bulkCreateSerials, deleteEmployee, resetEmployeeLogin, saveEmployee, validateSerialInput } from '../../services/employeeService';
 import { employeesToCsv, downloadCsv } from '../../utils/csv';
 import { friendlyMessage } from '../../utils/errors';
 import type { Employee } from '../../types';
 
-type FormState = { serial: string; employeeNo: string; name: string; department: string; active: boolean };
-const EMPTY_FORM: FormState = { serial: '', employeeNo: '', name: '', department: '', active: true };
+type FormState = { serial: string; employeeNo: string; name: string; department: string; phone: string; active: boolean };
+const EMPTY_FORM: FormState = { serial: '', employeeNo: '', name: '', department: '', phone: '', active: true };
 
 export default function EmployeesPage(): JSX.Element {
   const { employees, loading, error } = useEmployeeList();
@@ -37,7 +37,7 @@ export default function EmployeesPage(): JSX.Element {
   }
 
   function openEdit(e: Employee): void {
-    setEditing({ serial: e.serial, employeeNo: e.employeeNo, name: e.name, department: e.department, active: e.active });
+    setEditing({ serial: e.serial, employeeNo: e.employeeNo, name: e.name, department: e.department, phone: e.phone || '', active: e.active });
     setEditingSerial(e.serial);
     setFormError(null);
   }
@@ -61,6 +61,7 @@ export default function EmployeesPage(): JSX.Element {
         employeeNo: editing.employeeNo.trim(),
         name: editing.name.trim(),
         department: editing.department.trim(),
+        phone: editing.phone.trim(),
         active: editing.active,
       });
       setMessage(editingSerial ? `Serial ${serial} updated.` : `Serial ${serial} added.`);
@@ -94,6 +95,21 @@ export default function EmployeesPage(): JSX.Element {
     try {
       await deleteEmployee(e.serial);
       setMessage(`Serial ${e.serial} deleted.`);
+    } catch (err) {
+      setFormError(friendlyMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResetLogin(e: Employee): Promise<void> {
+    if (busy) return;
+    if (!window.confirm(`Reset login for serial ${e.serial} (${e.name || 'unnamed'})? Their phone will be logged out and the serial becomes free for a new login.`)) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await resetEmployeeLogin(e.serial);
+      setMessage(`Login reset for serial ${e.serial} — the employee can log in again from any phone.`);
     } catch (err) {
       setFormError(friendlyMessage(err));
     } finally {
@@ -171,13 +187,14 @@ export default function EmployeesPage(): JSX.Element {
                 <th>Employee No</th>
                 <th>Name</th>
                 <th>Department</th>
+                <th>Phone</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && !loading && (
-                <tr><td colSpan={6} className="empty-row">No employees yet. Add one or create serials in bulk.</td></tr>
+                <tr><td colSpan={7} className="empty-row">No employees yet. Add one or create serials in bulk.</td></tr>
               )}
               {filtered.map((e) => (
                 <tr key={e.serial} className={e.active ? '' : 'row-inactive'}>
@@ -185,10 +202,19 @@ export default function EmployeesPage(): JSX.Element {
                   <td className="mono">{e.employeeNo || '—'}</td>
                   <td>{e.name || <span className="muted">unclaimed</span>}</td>
                   <td>{e.department || '—'}</td>
-                  <td><span className={`mode-chip ${e.active ? 'mode-qr' : 'mode-manual'}`}>{e.active ? 'Active' : 'Inactive'}</span></td>
+                  <td className="mono">{e.phone || '—'}</td>
+                  <td>
+                    <span className={`mode-chip ${e.active ? 'mode-qr' : 'mode-manual'}`}>{e.active ? 'Active' : 'Inactive'}</span>
+                    {e.loggedIn && <span className="mode-chip mode-login">Logged in</span>}
+                  </td>
                   <td>
                     <div className="btn-row">
                       <button type="button" className="btn-ghost small" onClick={() => openEdit(e)}>Edit</button>
+                      {e.loggedIn && (
+                        <button type="button" className="btn-ghost small" disabled={busy} onClick={() => void handleResetLogin(e)}>
+                          Reset Login
+                        </button>
+                      )}
                       <button type="button" className="btn-ghost small" disabled={busy} onClick={() => void handleToggleActive(e)}>
                         {e.active ? 'Deactivate' : 'Activate'}
                       </button>
@@ -241,6 +267,16 @@ export default function EmployeesPage(): JSX.Element {
                 value={editing.department}
                 maxLength={40}
                 onChange={(ev) => setEditing({ ...editing, department: ev.target.value })}
+              />
+            </label>
+            <label className="field-label" htmlFor="emp-phone">
+              Phone Number
+              <input
+                id="emp-phone"
+                type="tel"
+                value={editing.phone}
+                maxLength={20}
+                onChange={(ev) => setEditing({ ...editing, phone: ev.target.value })}
               />
             </label>
             <label className="check-label">

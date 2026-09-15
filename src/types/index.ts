@@ -78,9 +78,15 @@ export interface Employee {
   employeeNo: string;
   name: string;
   department: string;
+  /** Contact number entered at login (optional). */
+  phone: string;
   active: boolean;
   createdAt: number;
   updatedAt: number;
+  /** True when a device is currently logged in with this serial. */
+  loggedIn?: boolean;
+  /** Timestamp of the current device login (ms epoch), null when logged out. */
+  loginAt?: number | null;
 }
 
 /** One row of the Admin "Serial Number Page": a day's billing for one serial. */

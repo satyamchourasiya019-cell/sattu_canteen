@@ -221,6 +221,11 @@ export async function apiBulkEmployees(count: number): Promise<number> {
   return res.added;
 }
 
+/** Admin action: sign the employee out of their device. */
+export async function apiEmployeeReset(serial: string): Promise<void> {
+  await request('POST', '/api/employee-reset', { serial });
+}
+
 // ---------------------------------------------------------- meal items ---
 export async function apiListMealItems(): Promise<MealItem[]> {
   const res = await request<{ items: MealItem[] }>('GET', '/api/meal-items');

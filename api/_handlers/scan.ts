@@ -11,6 +11,7 @@ import {
 import {
   createEmployeeSession,
   detectMeal,
+  dropEmployeeSessionsForSerial,
   formatTime12,
   getEmployeeSession,
   json,
@@ -32,12 +33,13 @@ async function sessionFrom(req: VercelRequest): Promise<EmployeeSessionPayload |
 }
 
 /**
- * POST /api/employee/register
- * One employee per serial rule is enforced atomically:
- *  - if the serial exists WITH a name, registration is rejected
- *  - if it exists without a name (admin placeholder), the caller claims it
- *  - if it does not exist and self-registration is on, it is created
- * A second person registering the same serial afterwards is always rejected.
+ * POST /api/employee-register  { serial, employeeNo?, name, department?, phone?, deviceId }
+ *
+ * Acts as login + one-time registration:
+ *  - A claimed serial (has a name) can only be logged into with that name.
+ *  - One device per serial: logging in from a new device/phone clears the
+ *    previous login for that serial (old phone is signed out).
+ *  - The login persists until the admin resets it or the employee logs out.
  */
 export async function employeeRegister(req: VercelRequest, res: VercelResponse): Promise<void> {
   const body = await readBody(req);
@@ -45,12 +47,17 @@ export async function employeeRegister(req: VercelRequest, res: VercelResponse):
   const name = String(body.name ?? '').trim().slice(0, 60);
   const employeeNo = canonicalSerial(body.employeeNo);
   const department = String(body.department ?? '').trim().slice(0, 40);
+  const phone = String(body.phone ?? '').trim().slice(0, 20);
+  const deviceId = String(body.deviceId ?? '').trim().slice(0, 64) || null;
 
   if (!serial || !/^[0-9A-Za-z-]{1,20}$/.test(serial)) {
     return json(res, 400, { error: 'SERIAL_INVALID', message: 'Please enter a valid serial number.' });
   }
   if (!name) {
     return json(res, 400, { error: 'VALIDATION', fieldErrors: { name: 'Name is required.' } });
+  }
+  if (phone && !/^[0-9+\-\s]{6,20}$/.test(phone)) {
+    return json(res, 400, { error: 'VALIDATION', fieldErrors: { phone: 'Please enter a valid phone number.' } });
   }
   if (employeeNo && !/^[0-9A-Za-z-]{1,20}$/.test(employeeNo)) {
     return json(res, 400, { error: 'VALIDATION', fieldErrors: { employeeNo: 'Invalid employee number format.' } });
@@ -83,6 +90,12 @@ export async function employeeRegister(req: VercelRequest, res: VercelResponse):
     return json(res, 400, { error: 'SERIAL_NOT_FOUND', message: 'Serial number not found. Ask the canteen supervisor to add you first.' });
   }
 
+  // One serial = one logged-in device. Logging in on a new phone invalidates
+  // the previous phone's session automatically.
+  if (existing?.loginDevice && deviceId && existing.loginDevice !== deviceId) {
+    await dropEmployeeSessionsForSerial(serial);
+  }
+
   const now = Date.now();
   const record: EmployeeRecord = existing
     ? {
@@ -90,9 +103,14 @@ export async function employeeRegister(req: VercelRequest, res: VercelResponse):
         name: existing.name || name,
         employeeNo: existing.employeeNo || employeeNo,
         department: existing.department || department,
+        phone: existing.phone || phone,
+        // This device is now the logged-in device for the serial. Any previous
+        // session was invalidated above — one serial, one active login.
+        loginDevice: deviceId,
+        loginAt: now,
         updatedAt: now,
       }
-    : { employeeNo, name, department, active: true, createdAt: now, updatedAt: now };
+    : { employeeNo, name, department, phone, active: true, createdAt: now, updatedAt: now, loginDevice: deviceId, loginAt: now };
 
   await setJSON(keys.employee(serial), record);
   // Keep the admin employee list in sync with self-registrations.
@@ -106,21 +124,34 @@ export async function employeeRegister(req: VercelRequest, res: VercelResponse):
       await setJSON(keys.employeeNoIndex, index);
     }
   }
-  const token = await createEmployeeSession(serial);
+  const token = await createEmployeeSession(serial, deviceId);
   json(res, 200, { token, employee: { serial, ...record } });
 }
 
-/** GET /api/employee/me */
+/** GET /api/employee-me */
 export async function employeeMe(req: VercelRequest, res: VercelResponse): Promise<void> {
   const s = await getEmployeeSession(req);
   if (!s) return json(res, 401, { error: 'UNAUTHENTICATED' });
   const emp = await getJSON<EmployeeRecord>(keys.employee(s.serial));
   if (!emp || emp.active === false) return json(res, 401, { error: 'UNAUTHENTICATED' });
+  // The admin can reset the login remotely — that removes loginDevice. A live
+  // session whose serial is no longer marked as logged in is signed out.
+  if (!emp.loginDevice) {
+    await dropEmployeeSessionsForSerial(s.serial);
+    return json(res, 401, { error: 'LOGIN_RESET', message: 'Your login was reset by the canteen supervisor. Please log in again.' });
+  }
   json(res, 200, { serial: s.serial, ...emp });
 }
 
-/** POST /api/employee/logout */
+/** POST /api/employee-logout — voluntary logout on the device. */
 export async function employeeLogout(req: VercelRequest, res: VercelResponse): Promise<void> {
+  const s = await getEmployeeSession(req);
+  if (s) {
+    const emp = await getJSON<EmployeeRecord>(keys.employee(s.serial));
+    if (emp && emp.loginDevice && emp.loginDevice === s.deviceId) {
+      await setJSON(keys.employee(s.serial), { ...emp, loginDevice: null, loginAt: null, updatedAt: Date.now() });
+    }
+  }
   const { dropEmployeeSession } = await import('../_lib/util');
   await dropEmployeeSession(req);
   json(res, 200, { ok: true });

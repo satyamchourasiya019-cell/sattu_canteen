@@ -51,6 +51,7 @@ export function useEmployeeSession() {
             employeeNo: check.employeeNo ?? '',
             name: check.name ?? '',
             department: check.department ?? '',
+            phone: check.phone ?? '',
             active: true,
             createdAt: 0,
             updatedAt: 0,
@@ -69,7 +70,7 @@ export function useEmployeeSession() {
   }, []);
 
   const login = useCallback(
-    async (input: { serial: string; employeeNo: string; name: string; department: string }) => {
+    async (input: { serial: string; employeeNo: string; name: string; department: string; phone: string }) => {
       if (BACKEND_MODE !== 'firebase') {
         const res = await api.apiEmployeeRegister(input);
         setEmployee(res.employee);
@@ -105,6 +106,7 @@ export function useEmployeeSession() {
         employeeNo: check.employeeNo || input.employeeNo.trim(),
         name: check.name || input.name.trim(),
         department: check.department || input.department.trim(),
+        phone: check.phone || input.phone.trim(),
         active: true,
         createdAt: 0,
         updatedAt: 0,

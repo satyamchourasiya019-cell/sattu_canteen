@@ -15,6 +15,7 @@ import {
 } from '../_lib/store';
 import {
   createSession,
+  dropEmployeeSessionsForSerial,
   getAdminSession,
   dropSession,
   getEmployeeSession,
@@ -76,7 +77,7 @@ export async function listEmployees(req: VercelRequest, res: VercelResponse): Pr
   if (!(await requireAdmin(req, res))) return;
   // Serial set is stored as one JSON map (employees serials are few hundred).
   const all = (await getJSON<Record<string, EmployeeRecord>>('employees:index')) ?? {};
-  const list = Object.entries(all).map(([serial, e]) => ({ serial, ...e }));
+  const list = Object.entries(all).map(([serial, e]) => ({ serial, ...e, loggedIn: Boolean(e.loginDevice) }));
   list.sort((a, b) => a.serial.localeCompare(b.serial, undefined, { numeric: true }));
   json(res, 200, { employees: list });
 }
@@ -97,10 +98,14 @@ export async function saveEmployee(req: VercelRequest, res: VercelResponse, seri
   const employeeNo = body.employeeNo !== undefined ? String(body.employeeNo).trim() : existing?.employeeNo ?? '';
   const name = body.name !== undefined ? String(body.name).trim() : existing?.name ?? '';
   const department = body.department !== undefined ? String(body.department).trim() : existing?.department ?? '';
+  const phone = body.phone !== undefined ? String(body.phone).trim() : existing?.phone ?? '';
   const active = body.active !== undefined ? body.active !== false : existing?.active !== false;
 
   if (employeeNo && !/^[0-9A-Za-z-]{1,20}$/.test(employeeNo)) {
     return json(res, 400, { error: 'VALIDATION', fieldErrors: { employeeNo: 'Invalid employee number format.' } });
+  }
+  if (phone && !/^[0-9+\-\s]{6,20}$/.test(phone)) {
+    return json(res, 400, { error: 'VALIDATION', fieldErrors: { phone: 'Please enter a valid phone number.' } });
   }
   // Employee number uniqueness across serials.
   if (employeeNo) {
@@ -116,11 +121,19 @@ export async function saveEmployee(req: VercelRequest, res: VercelResponse, seri
     employeeNo,
     name,
     department,
+    phone,
     active,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+    // Admin reassignment/rename → drop the old device login so a new person
+    // can claim this serial on their own phone.
+    loginDevice: body.resetLogin === true || (body.name !== undefined && name !== (existing?.name ?? '')) ? null : existing?.loginDevice ?? null,
+    loginAt: body.resetLogin === true || (body.name !== undefined && name !== (existing?.name ?? '')) ? null : existing?.loginAt ?? null,
   };
   await setJSON(keys.employee(serial), record);
+  if (body.resetLogin === true || (body.name !== undefined && name !== (existing?.name ?? ''))) {
+    await dropEmployeeSessionsForSerial(serial);
+  }
 
   // Keep the admin list index and employeeNo ownership in sync.
   const all = (await getJSON<Record<string, EmployeeRecord>>('employees:index')) ?? {};
@@ -140,13 +153,23 @@ export async function getEmployeeQuery(req: VercelRequest, res: VercelResponse):
   if (!serial) return json(res, 400, { error: 'SERIAL_REQUIRED' });
   const e = await getJSON<EmployeeRecord>(keys.employee(serial));
   if (!e) return json(res, 404, { error: 'NOT_FOUND' });
-  json(res, 200, { serial, name: e.name, employeeNo: e.employeeNo || '', department: e.department || '', active: e.active });
+  json(res, 200, {
+    serial,
+    name: e.name,
+    employeeNo: e.employeeNo || '',
+    department: e.department || '',
+    phone: e.phone || '',
+    active: e.active,
+    loggedIn: Boolean(e.loginDevice),
+  });
 }
 
 export async function deleteEmployee(req: VercelRequest, res: VercelResponse, serial: string): Promise<void> {
   if (!(await requireAdmin(req, res))) return;
   const existing = await getJSON<EmployeeRecord>(keys.employee(serial));
   await del(keys.employee(serial));
+  // Deleting the serial also removes its device login.
+  await dropEmployeeSessionsForSerial(serial);
   const all = (await getJSON<Record<string, EmployeeRecord>>('employees:index')) ?? {};
   if (all[serial]) {
     delete all[serial];
@@ -162,6 +185,27 @@ export async function deleteEmployee(req: VercelRequest, res: VercelResponse, se
   json(res, 200, { ok: true });
 }
 
+/**
+ * POST /api/employee-reset { serial } — sign the employee out of their device.
+ * They can log in again at any time (with the same serial + their name).
+ */
+export async function resetEmployeeLogin(req: VercelRequest, res: VercelResponse): Promise<void> {
+  if (!(await requireAdmin(req, res))) return;
+  const body = await readBody(req);
+  const serial = canonicalSerial(body.serial);
+  if (!serial) return json(res, 400, { error: 'VALIDATION', fieldErrors: { serial: 'Serial required.' } });
+  const existing = await getJSON<EmployeeRecord>(keys.employee(serial));
+  if (!existing) return json(res, 404, { error: 'NOT_FOUND', message: 'Serial not found.' });
+  await setJSON(keys.employee(serial), { ...existing, loginDevice: null, loginAt: null, updatedAt: Date.now() });
+  const all = (await getJSON<Record<string, EmployeeRecord>>('employees:index')) ?? {};
+  if (all[serial]) {
+    all[serial] = { ...all[serial], loginDevice: null, loginAt: null, updatedAt: Date.now() };
+    await setJSON('employees:index', all);
+  }
+  await dropEmployeeSessionsForSerial(serial);
+  json(res, 200, { ok: true });
+}
+
 export async function bulkEmployees(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (!(await requireAdmin(req, res))) return;
   const body = await readBody(req);
@@ -173,7 +217,7 @@ export async function bulkEmployees(req: VercelRequest, res: VercelResponse): Pr
   for (let i = 1; i <= count; i++) {
     const serial = String(i).padStart(pad, '0');
     if (!all[serial]) {
-      const record: EmployeeRecord = { employeeNo: '', name: '', department: '', active: true, createdAt: now, updatedAt: now };
+      const record: EmployeeRecord = { employeeNo: '', name: '', department: '', phone: '', active: true, createdAt: now, updatedAt: now, loginDevice: null, loginAt: null };
       all[serial] = record;
       await setJSON(keys.employee(serial), record);
       added++;

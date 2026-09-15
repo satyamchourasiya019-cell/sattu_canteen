@@ -1,37 +1,34 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useEmployeeSession } from '../../hooks/useEmployeeSession';
 import { useSettings } from '../../hooks/useSettings';
 import { ApiError } from '../../services/api';
 import { friendlyMessage } from '../../utils/errors';
 import { formatDisplayDate, todayDateString } from '../../utils/format';
 
-type FieldErrors = Partial<Record<'serial' | 'employeeNo' | 'name' | 'department' | 'form', string>>;
+type FieldErrors = Partial<Record<'serial' | 'name' | 'phone' | 'form', string>>;
 
 /**
- * Employee home: register once (serial + name + employee no + department),
- * then the device stays identified. Two big QR-destination buttons follow.
+ * App-style login: the employee signs in ONCE with serial + name (+ phone,
+ * department). The device stays logged in until the ADMIN removes it —
+ * "Not you? Log out" only frees the serial for the next person; one serial
+ * can be logged in on a single device at a time.
  */
 export default function EmployeeHome(): JSX.Element {
   const { employee, loading, login, logout } = useEmployeeSession();
   const { settings } = useSettings();
-  const [params] = useSearchParams();
+  const navigate = useNavigate();
 
   const [serial, setSerial] = useState('');
-  const [employeeNo, setEmployeeNo] = useState('');
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [department, setDepartment] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const s = params.get('serial');
-    if (s) setSerial(s.trim().replace(/\s+/g, ''));
-  }, [params]);
-
-  useEffect(() => {
     setErrors({});
-  }, [serial, employeeNo, name, department]);
+  }, [serial, name, phone, department]);
 
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -39,12 +36,19 @@ export default function EmployeeHome(): JSX.Element {
     const next: FieldErrors = {};
     if (!serial.trim()) next.serial = 'Serial number is required.';
     if (!name.trim()) next.name = 'Name is required.';
+    if (phone.trim() && !/^[0-9+\-\s]{6,20}$/.test(phone.trim())) next.phone = 'Please enter a valid phone number.';
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
     setSubmitting(true);
     try {
-      await login({ serial: serial.trim().replace(/\s+/g, ''), employeeNo: employeeNo.trim(), name: name.trim(), department: department.trim() });
+      await login({
+        serial: serial.trim().replace(/\s+/g, ''),
+        employeeNo: '',
+        name: name.trim(),
+        department: department.trim(),
+        phone: phone.trim(),
+      });
     } catch (err) {
       if (err instanceof ApiError && err.fieldErrors) {
         setErrors({ ...err.fieldErrors, form: err.message });
@@ -56,11 +60,11 @@ export default function EmployeeHome(): JSX.Element {
     }
   }
 
-  async function handleLogout(): Promise<void> {
+  async function handleSwitchUser(): Promise<void> {
     await logout();
     setSerial('');
-    setEmployeeNo('');
     setName('');
+    setPhone('');
     setDepartment('');
   }
 
@@ -95,24 +99,35 @@ export default function EmployeeHome(): JSX.Element {
             </div>
           </div>
 
-          <p className="muted small center-text">What did you take? Scan the matching QR in the canteen, or tap below:</p>
-
-          <Link to="/qr/breakfastSnacks" className="qr-btn">
-            <span className="qr-btn-icon" aria-hidden>🌅</span>
-            <span>
-              <strong>Breakfast / Snacks QR</strong>
-              <small>Morning & evening counter</small>
+          <button type="button" className="scan-cta" onClick={() => navigate('/scan')}>
+            <span className="scan-cta-icon" aria-hidden>
+              <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+              </svg>
             </span>
-          </Link>
-          <Link to="/qr/lunchDinner" className="qr-btn">
-            <span className="qr-btn-icon" aria-hidden>🍛</span>
             <span>
-              <strong>Lunch / Dinner QR</strong>
-              <small>Afternoon & night counter</small>
+              <strong>Scan Canteen QR</strong>
+              <small>Camera opens — point at the counter code</small>
             </span>
-          </Link>
+          </button>
 
-          <button type="button" className="btn-ghost small logout-link" onClick={handleLogout}>
+          <p className="muted small center-text">No camera? Open a counter link directly:</p>
+          <div className="qr-btn-row">
+            <Link to="/qr/breakfastSnacks" className="qr-btn compact">
+              <span className="qr-btn-icon" aria-hidden>🌅</span>
+              <span><strong>Breakfast / Snacks</strong></span>
+            </Link>
+            <Link to="/qr/lunchDinner" className="qr-btn compact">
+              <span className="qr-btn-icon" aria-hidden>🍛</span>
+              <span><strong>Lunch / Dinner</strong></span>
+            </Link>
+          </div>
+
+          <p className="muted small center-text login-note">
+            You stay logged in on this phone until the canteen admin removes you.
+          </p>
+          <button type="button" className="btn-ghost small logout-link" onClick={handleSwitchUser}>
             Not you? Log out
           </button>
         </div>
@@ -124,13 +139,13 @@ export default function EmployeeHome(): JSX.Element {
     <div className="order-wrap">
       <header className="order-header">
         <div className="order-logo" aria-hidden>🍽</div>
-        <h1>{settings.canteenName || 'Canteen'} — Register</h1>
+        <h1>{settings.canteenName || 'Canteen'}</h1>
         <p className="muted">{formatDisplayDate(todayDateString())}</p>
       </header>
 
       <form className="order-card" onSubmit={handleSubmit}>
-        <h2 className="order-title">Employee Registration</h2>
-        <p className="muted small">One time only — this phone will remember you.</p>
+        <h2 className="order-title">Employee Login</h2>
+        <p className="muted small">One time only — this phone will remember you until the admin removes you.</p>
 
         <label className="field-label" htmlFor="reg-serial">
           Serial Number *
@@ -151,7 +166,7 @@ export default function EmployeeHome(): JSX.Element {
           <input
             id="reg-name"
             autoComplete="name"
-            placeholder="e.g. Satyam Chourasiya"
+            placeholder="Your full name"
             value={name}
             maxLength={60}
             onChange={(e) => setName(e.target.value)}
@@ -159,19 +174,20 @@ export default function EmployeeHome(): JSX.Element {
         </label>
         {errors.name && <div className="field-error">{errors.name}</div>}
 
-        <label className="field-label" htmlFor="reg-empno">
-          Employee Number
+        <label className="field-label" htmlFor="reg-phone">
+          Phone Number
           <input
-            id="reg-empno"
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="e.g. 10245"
-            value={employeeNo}
+            id="reg-phone"
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="e.g. 98765 43210"
+            value={phone}
             maxLength={20}
-            onChange={(e) => setEmployeeNo(e.target.value)}
+            onChange={(e) => setPhone(e.target.value)}
           />
         </label>
-        {errors.employeeNo && <div className="field-error">{errors.employeeNo}</div>}
+        {errors.phone && <div className="field-error">{errors.phone}</div>}
 
         <label className="field-label" htmlFor="reg-dept">
           Department
@@ -183,12 +199,11 @@ export default function EmployeeHome(): JSX.Element {
             onChange={(e) => setDepartment(e.target.value)}
           />
         </label>
-        {errors.department && <div className="field-error">{errors.department}</div>}
 
         {errors.form && <div className="banner banner-error">{errors.form}</div>}
 
         <button type="submit" className="btn-primary btn-block" disabled={submitting}>
-          {submitting ? 'Registering…' : 'Register / Continue'}
+          {submitting ? 'Logging in…' : 'Login'}
         </button>
       </form>
     </div>

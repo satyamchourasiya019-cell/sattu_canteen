@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { BACKEND_MODE } from './firebase/config';
 import { useAdminAuth } from './hooks/useAdminAuth';
 import EmployeeHome from './pages/employee/EmployeeHome';
+import QrScanPage from './pages/employee/QrScanPage';
 import ScanPage from './pages/employee/ScanPage';
 import LoginPage from './pages/LoginPage';
 import AdminLayout from './pages/admin/AdminLayout';
@@ -44,6 +45,7 @@ export default function App(): JSX.Element {
       <Routes>
         <Route path="/" element={<Navigate to="/user-ordering" replace />} />
         <Route path="/user-ordering" element={<EmployeeHome />} />
+        <Route path="/scan" element={<QrScanPage />} />
         <Route path="/qr/:qrType" element={<ScanPage />} />
 
         <Route path="/admin/login" element={<LoginPage />} />

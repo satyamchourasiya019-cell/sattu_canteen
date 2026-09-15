@@ -23,6 +23,7 @@
 }
 .mode-manual { background: #fdecea; color: var(--danger); }
 .mode-addon { background: #fef7e0; color: #8a6d00; }
+.mode-login { background: #e6f4ea; color: var(--ok); margin-left: 6px; }
 
 .data-table td .btn-row { flex-wrap: nowrap; }
 .data-table td .btn-row .btn-ghost,

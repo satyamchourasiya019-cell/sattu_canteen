@@ -27,9 +27,12 @@ function toEmployee(serial: string, data: Record<string, unknown>): Employee {
     employeeNo: typeof data.employeeNo === 'string' ? data.employeeNo : '',
     name: typeof data.name === 'string' ? data.name : '',
     department: typeof data.department === 'string' ? data.department : '',
+    phone: typeof data.phone === 'string' ? data.phone : '',
     active: data.active !== false,
     createdAt: typeof data.createdAt === 'number' ? data.createdAt : 0,
     updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : 0,
+    loggedIn: data.loggedIn === true || typeof data.loginDevice === 'string' && data.loginDevice !== '',
+    loginAt: typeof data.loginAt === 'number' ? data.loginAt : null,
   };
 }
 
@@ -88,6 +91,7 @@ export interface SerialCheck {
   employeeNo?: string;
   name?: string;
   department?: string;
+  phone?: string;
 }
 
 /**
@@ -100,7 +104,7 @@ export async function checkSerial(serial: string): Promise<SerialCheck> {
       const r = await api.apiGetEmployee(serial);
       if (!r.exists) return { ok: false, reason: 'not_found' };
       if (!r.active) return { ok: false, reason: 'inactive' };
-      return { ok: true, reason: null, employeeNo: (r as { employeeNo?: string }).employeeNo ?? '', name: (r as { name?: string }).name ?? '', department: (r as { department?: string }).department ?? '' };
+      return { ok: true, reason: null, employeeNo: (r as { employeeNo?: string }).employeeNo ?? '', name: (r as { name?: string }).name ?? '', department: (r as { department?: string }).department ?? '', phone: (r as { phone?: string }).phone ?? '' };
     } catch {
       return { ok: false, reason: 'db' };
     }
@@ -117,6 +121,7 @@ export async function checkSerial(serial: string): Promise<SerialCheck> {
       employeeNo: typeof data.employeeNo === 'string' ? data.employeeNo : '',
       name: typeof data.name === 'string' ? data.name : '',
       department: typeof data.department === 'string' ? data.department : '',
+      phone: typeof data.phone === 'string' ? data.phone : '',
     };
   } catch {
     return { ok: false, reason: 'db' };
@@ -138,6 +143,16 @@ export async function deleteEmployee(serial: string): Promise<void> {
   if (BACKEND_MODE !== 'firebase') return api.apiDeleteEmployee(serial);
   const db = requireDb();
   await deleteDoc(doc(db, COLLECTION, serial));
+}
+
+/**
+ * Admin action: sign the employee out of their device. The employee can log
+ * in again afterwards (Firebase mode uses a Firestore flag; see FIREBASE_SETUP.md).
+ */
+export async function resetEmployeeLogin(serial: string): Promise<void> {
+  if (BACKEND_MODE !== 'firebase') return api.apiEmployeeReset(serial);
+  const db = requireDb();
+  await setDoc(doc(db, COLLECTION, serial), { loginDevice: null, loginAt: null, updatedAt: Date.now() }, { merge: true });
 }
 
 export async function bulkCreateSerials(count: number): Promise<number> {

@@ -94,12 +94,27 @@ export async function dropSession(req: VercelRequest): Promise<void> {
   }
 }
 
-export async function createEmployeeSession(serial: string): Promise<string> {
+export async function createEmployeeSession(serial: string, deviceId?: string | null): Promise<string> {
   const token = crypto.randomBytes(20).toString('hex');
   const sessions = (await getJSON<Record<string, EmployeeSessionRecord>>(keys.employeeSessions)) ?? {};
-  sessions[token] = { serial, createdAt: Date.now() };
+  // Employee sessions do not expire: the login stays until the admin resets
+  // it or the employee logs out on the device.
+  sessions[token] = { serial, createdAt: Date.now(), deviceId: deviceId ?? null };
   await setJSON(keys.employeeSessions, sessions);
   return token;
+}
+
+/** Kill every employee session for a serial (admin reset / delete / deactivate). */
+export async function dropEmployeeSessionsForSerial(serial: string): Promise<void> {
+  const sessions = (await getJSON<Record<string, EmployeeSessionRecord>>(keys.employeeSessions)) ?? {};
+  let changed = false;
+  for (const [tok, s] of Object.entries(sessions)) {
+    if (s.serial === serial) {
+      delete sessions[tok];
+      changed = true;
+    }
+  }
+  if (changed) await setJSON(keys.employeeSessions, sessions);
 }
 
 export async function getEmployeeSession(req: VercelRequest): Promise<EmployeeSessionRecord | null> {

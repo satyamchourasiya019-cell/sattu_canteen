@@ -35,6 +35,8 @@ const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
   { method: 'POST', pattern: /^\/api\/employee-register$/, handler: scan.employeeRegister },
   { method: 'GET', pattern: /^\/api\/employee-me$/, handler: scan.employeeMe },
   { method: 'POST', pattern: /^\/api\/employee-logout$/, handler: scan.employeeLogout },
+  // Admin action: sign the employee out of their device (they can log in again).
+  { method: 'POST', pattern: /^\/api\/employee-reset$/, handler: admin.resetEmployeeLogin },
 
   // scan flow (served by api/scan.ts)
   { method: 'GET', pattern: /^\/api\/scan-context$/, handler: scan.scanContext },

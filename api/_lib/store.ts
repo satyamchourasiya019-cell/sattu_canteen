@@ -100,9 +100,14 @@ export interface EmployeeRecord {
   employeeNo: string;
   name: string;
   department: string;
+  phone?: string;
   active: boolean;
   createdAt: number;
   updatedAt: number;
+  /** Device currently logged in as this employee (login persists until the
+   *  admin resets it or the employee logs out on the device itself). */
+  loginDevice?: string | null;
+  loginAt?: number | null;
 }
 
 export interface MealItemRecord {
@@ -158,6 +163,7 @@ export interface SessionRecord {
 export interface EmployeeSessionRecord {
   serial: string;
   createdAt: number;
+  deviceId?: string | null;
 }
 
 export const DEFAULT_SETTINGS: SettingsRecord = {

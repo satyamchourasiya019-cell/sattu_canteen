@@ -186,6 +186,15 @@ function employeeToken() {
   return crypto.randomBytes(20).toString('hex');
 }
 
+/** Kill every employee session for a serial (admin reset / reassign / delete). */
+function dropEmployeeSessionsForSerial(serial) {
+  let changed = false;
+  for (const [tok, es] of Object.entries(db.employeeSessions)) {
+    if (es.serial === serial) { delete db.employeeSessions[tok]; changed = true; }
+  }
+  if (changed) saveDb();
+}
+
 // --------------------------------------------- meal / time computation ---
 /** "14:05" -> minutes since midnight. */
 function minutesOf(hhmm) {
@@ -280,10 +289,10 @@ route('GET', /^\/api\/employees$/, async (req, res, m, body, s) => {
   if (req.query.serial) {
     const e = db.employees[String(req.query.serial)];
     if (!e) return json(res, 404, { error: 'NOT_FOUND' });
-    return json(res, 200, { serial: String(req.query.serial), name: e.name, employeeNo: e.employeeNo || '', department: e.department || '', active: e.active });
+    return json(res, 200, { serial: String(req.query.serial), name: e.name, employeeNo: e.employeeNo || '', department: e.department || '', phone: e.phone || '', active: e.active, loggedIn: Boolean(e.loginDevice) });
   }
   if (!s) return json(res, 401, { error: 'UNAUTHENTICATED' });
-  const list = Object.entries(db.employees).map(([serial, e]) => ({ serial, ...e }));
+  const list = Object.entries(db.employees).map(([serial, e]) => ({ serial, ...e, loggedIn: Boolean(e.loginDevice) }));
   list.sort((a, b) => a.serial.localeCompare(b.serial, undefined, { numeric: true }));
   json(res, 200, { employees: list });
 });
@@ -291,7 +300,7 @@ route('GET', /^\/api\/employees$/, async (req, res, m, body, s) => {
 route('GET', /^\/api\/employees\/([0-9A-Za-z-]{1,20})$/, async (req, res, m) => {
   const e = db.employees[m[1]];
   if (!e) return json(res, 404, { error: 'NOT_FOUND' });
-  json(res, 200, { serial: m[1], name: e.name, employeeNo: e.employeeNo || '', department: e.department || '', active: e.active });
+  json(res, 200, { serial: m[1], name: e.name, employeeNo: e.employeeNo || '', department: e.department || '', phone: e.phone || '', active: e.active, loggedIn: Boolean(e.loginDevice) });
 });
 
 function validateEmployeeBody(body) {
@@ -299,10 +308,12 @@ function validateEmployeeBody(body) {
   const empNo = String(body.employeeNo ?? '').trim();
   const name = String(body.name ?? '').trim();
   const department = String(body.department ?? '').trim();
-  if (!name) errors.name = 'Name is required.';
+  const phone = String(body.phone ?? '').trim();
+  if (body.name !== undefined && !name) errors.name = 'Name is required.';
   if (department.length > 40) errors.department = 'Department is too long.';
+  if (phone && !/^[0-9+\-\s]{6,20}$/.test(phone)) errors.phone = 'Please enter a valid phone number.';
   if (empNo && !/^[0-9A-Za-z-]{1,20}$/.test(empNo)) errors.employeeNo = 'Invalid employee number format.';
-  return { errors, empNo, name, department };
+  return { errors, empNo, name, department, phone };
 }
 
 function employeeNoTaken(empNo, exceptSerial) {
@@ -314,32 +325,53 @@ route('PUT', /^\/api\/employees\/([0-9A-Za-z-]{1,20})$/, async (req, res, m, bod
   if (!s) return json(res, 401, { error: 'UNAUTHENTICATED' });
   const serial = m[1];
   const existing = db.employees[serial];
-  const { errors, empNo, name, department } = validateEmployeeBody(body);
+  const { errors, empNo, name, department, phone } = validateEmployeeBody(body);
   if (Object.keys(errors).length) return json(res, 400, { error: 'VALIDATION', fieldErrors: errors });
   if (employeeNoTaken(empNo, serial)) {
     return json(res, 400, { error: 'VALIDATION', fieldErrors: { employeeNo: 'This employee number is already used by another serial.' } });
   }
   const t = now();
+  // Renaming/reassigning the serial or an explicit reset removes the device
+  // login so a new person can claim it on their own phone.
+  const nameChanged = body.name !== undefined && existing && existing.name && name !== existing.name;
+  const resetLogin = body.resetLogin === true || nameChanged;
+  if (resetLogin) dropEmployeeSessionsForSerial(serial);
   db.employees[serial] = {
     employeeNo: empNo,
-    name,
-    department,
+    name: body.name !== undefined ? name : (existing?.name ?? ''),
+    department: body.department !== undefined ? department : (existing?.department ?? ''),
+    phone: body.phone !== undefined ? phone : (existing?.phone ?? ''),
     active: body.active === undefined ? (existing?.active !== false) : body.active !== false,
     createdAt: existing?.createdAt ?? t,
     updatedAt: t,
+    loginDevice: resetLogin ? null : (existing?.loginDevice ?? null),
+    loginAt: resetLogin ? null : (existing?.loginAt ?? null),
   };
   saveDb();
   broadcast('employees', { serial });
   json(res, 200, { serial, ...db.employees[serial] });
 });
 
+// Admin action: sign an employee out of their device (they can log in again).
+route('POST', /^\/api\/employee-reset$/, async (req, res, m, body, s) => {
+  if (!s) return json(res, 401, { error: 'UNAUTHENTICATED' });
+  const serial = canonicalSerial(body.serial);
+  const e = db.employees[serial];
+  if (!e) return json(res, 404, { error: 'NOT_FOUND', message: 'Serial not found.' });
+  e.loginDevice = null;
+  e.loginAt = null;
+  e.updatedAt = now();
+  dropEmployeeSessionsForSerial(serial);
+  saveDb();
+  broadcast('employees', { serial });
+  json(res, 200, { ok: true });
+});
+
 route('DELETE', /^\/api\/employees\/([0-9A-Za-z-]{1,20})$/, async (req, res, m, body, s) => {
   if (!s) return json(res, 401, { error: 'UNAUTHENTICATED' });
   delete db.employees[m[1]];
   // Remove any stored employee session for this serial.
-  for (const [tok, es] of Object.entries(db.employeeSessions)) {
-    if (es.serial === m[1]) delete db.employeeSessions[tok];
-  }
+  dropEmployeeSessionsForSerial(m[1]);
   saveDb();
   broadcast('employees', { serial: m[1] });
   json(res, 200, { ok: true });
@@ -354,7 +386,7 @@ route('POST', /^\/api\/employees\/bulk$/, async (req, res, m, body, s) => {
   for (let i = 1; i <= count; i++) {
     const serial = String(i).padStart(pad, '0');
     if (!db.employees[serial]) {
-      db.employees[serial] = { employeeNo: '', name: '', department: '', active: true, createdAt: t, updatedAt: t };
+      db.employees[serial] = { employeeNo: '', name: '', department: '', phone: '', active: true, createdAt: t, updatedAt: t, loginDevice: null, loginAt: null };
       added++;
     }
   }
@@ -366,16 +398,27 @@ route('POST', /^\/api\/employees\/bulk$/, async (req, res, m, body, s) => {
 // ---- employee self-service (no login) ----
 // Sign up / log in by serial. When the serial already exists, name/dept are
 // only accepted from the admin record; the employee just gets a session.
+/**
+ * Employee login / one-time registration.
+ *  - A claimed serial can only be logged into with that name.
+ *  - One device per serial: logging in on a new phone signs the old one out.
+ *  - Login persists until the admin resets it or the employee logs out.
+ */
 route('POST', /^\/api\/employee\/register$/, async (req, res) => {
   const serial = canonicalSerial(req.body.serial);
   const name = String(req.body.name ?? '').trim().slice(0, 60);
   const employeeNo = canonicalSerial(req.body.employeeNo);
   const department = String(req.body.department ?? '').trim().slice(0, 40);
+  const phone = String(req.body.phone ?? '').trim().slice(0, 20);
+  const deviceId = String(req.body.deviceId ?? '').trim().slice(0, 64) || null;
 
   if (!serial || !/^[0-9A-Za-z-]{1,20}$/.test(serial)) {
     return json(res, 400, { error: 'SERIAL_INVALID', message: 'Please enter a valid serial number.' });
   }
   if (!name) return json(res, 400, { error: 'VALIDATION', fieldErrors: { name: 'Name is required.' } });
+  if (phone && !/^[0-9+\-\s]{6,20}$/.test(phone)) {
+    return json(res, 400, { error: 'VALIDATION', fieldErrors: { phone: 'Please enter a valid phone number.' } });
+  }
   if (employeeNo && !/^[0-9A-Za-z-]{1,20}$/.test(employeeNo)) {
     return json(res, 400, { error: 'VALIDATION', fieldErrors: { employeeNo: 'Invalid employee number format.' } });
   }
@@ -397,11 +440,16 @@ route('POST', /^\/api\/employee\/register$/, async (req, res) => {
   }
 
   const t = now();
+  // One serial = one logged-in device: a new phone takes over and the old
+  // phone's session is invalidated.
+  if (existing?.loginDevice && deviceId && existing.loginDevice !== deviceId) {
+    dropEmployeeSessionsForSerial(serial);
+  }
   if (!existing) {
     if (!db.settings.allowSelfRegistration) {
       return json(res, 400, { error: 'SERIAL_NOT_FOUND', message: 'Serial number not found. Ask the canteen supervisor to add you first.' });
     }
-    db.employees[serial] = { employeeNo, name, department, active: true, createdAt: t, updatedAt: t };
+    db.employees[serial] = { employeeNo, name, department, phone, active: true, createdAt: t, updatedAt: t, loginDevice: deviceId, loginAt: t };
   } else {
     // Serial exists: update missing fields only (admin data wins).
     db.employees[serial] = {
@@ -409,11 +457,14 @@ route('POST', /^\/api\/employee\/register$/, async (req, res) => {
       employeeNo: existing.employeeNo || employeeNo,
       name: existing.name || name,
       department: existing.department || department,
+      phone: existing.phone || phone,
       updatedAt: t,
+      loginDevice: deviceId,
+      loginAt: t,
     };
   }
   const token = employeeToken();
-  db.employeeSessions[token] = { serial, createdAt: t };
+  db.employeeSessions[token] = { serial, createdAt: t, deviceId };
   saveDb();
   broadcast('employees', { serial });
   json(res, 200, { token, employee: { serial, ...db.employees[serial] } });
@@ -427,6 +478,12 @@ route('GET', /^\/api\/employee\/me$/, async (req, res) => {
     delete db.employeeSessions[req.headers.authorization?.slice(7)];
     saveDb();
     return json(res, 401, { error: 'UNAUTHENTICATED' });
+  }
+  // Admin reset removes loginDevice — a live session without it is signed out.
+  if (!e.loginDevice) {
+    delete db.employeeSessions[req.headers.authorization?.slice(7)];
+    saveDb();
+    return json(res, 401, { error: 'LOGIN_RESET', message: 'Your login was reset by the canteen supervisor. Please log in again.' });
   }
   json(res, 200, { serial: s.serial, ...e });
 });
@@ -443,6 +500,14 @@ route('POST', /^\/api\/employee\/logout$/, async (req, res) => {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (token && db.employeeSessions[token]) {
+    const s = db.employeeSessions[token];
+    const e = db.employees[s.serial];
+    // Voluntary logout frees the serial for another device.
+    if (e && e.loginDevice && e.loginDevice === s.deviceId) {
+      e.loginDevice = null;
+      e.loginAt = null;
+      e.updatedAt = now();
+    }
     delete db.employeeSessions[token];
     saveDb();
   }
