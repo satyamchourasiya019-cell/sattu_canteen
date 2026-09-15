@@ -334,17 +334,15 @@ export async function listDailyEntries(req: VercelRequest, res: VercelResponse):
   const from = (req.query.from as string) || todayLocal();
   const to = (req.query.to as string) || from;
   const ids = await txnIdsForRange(from, to);
+  // Pipelined reads: transactions + live employee master data in two batches.
   const records = await getMany<TransactionRecord>(ids.map((id) => keys.transaction(id)));
   const txns = records.filter((t): t is TransactionRecord => t !== null);
-  // Batch employee lookups so live master data needs one pipeline, not N.
   const serials = [...new Set(txns.map((t) => t.serial))];
   const emps = await getMany<EmployeeRecord>(serials.map((s) => keys.employee(s)));
   const empBySerial = new Map<string, EmployeeRecord | null>();
   serials.forEach((s, i) => empBySerial.set(s, emps[i]));
   const bySerial = new Map<string, Record<string, unknown>>();
-  for (const id of ids) {
-    const t = await getJSON<TransactionRecord>(keys.transaction(id));
-    if (!t) continue;
+  for (const t of txns) {
     let e = bySerial.get(t.serial) as
       | { serial: string; employeeNo: string; name: string; department: string; date: string; breakfast: number; snacks: number; lunch: number; dinner: number; addonAmount: number; addons: { id: string; name: string; price: number }[]; total: number; lastTime: string }
       | undefined;

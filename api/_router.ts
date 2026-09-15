@@ -28,9 +28,10 @@ export default async function handle(req: VercelRequest, res: VercelResponse): P
   const body: Body = req.method === 'POST' ? { ...(await readBody(req)) } : {};
   try {
     switch (`${req.method} ${path}`) {
-      // ---- api/index.ts ----
+      // ---- api/index.ts + api/health.ts ----
       case 'GET /api':
-        return json(res, 200, { ok: true, mode: 'cloud', storage: 'upstash' });
+      case 'GET /api/health':
+        return json(res, 200, { ok: true, mode: 'cloud', storage: 'upstash', time: new Date().toISOString() });
 
       // ---- api/auth.ts ----
       case 'POST /api/auth':

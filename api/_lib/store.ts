@@ -49,9 +49,14 @@ export async function del(key: string): Promise<void> {
  * Execute many Redis commands in one REST roundtrip (Upstash pipeline).
  * Critical for list endpoints: a day with hundreds of transactions must not
  * pay one HTTP roundtrip per record.
+ *
+ * NOTE: Upstash's pipeline endpoint is a distinct path (/pipeline) — posting
+ * an array-of-arrays to the root URL returns 400.
  */
 export async function pipeline(commands: (string | number)[][]): Promise<unknown[]> {
-  const res = await fetch(REST_URL, {
+  if (commands.length === 0) return [];
+  const url = `${REST_URL.replace(/\/+$/, '')}/pipeline`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${REST_TOKEN}`,
@@ -63,8 +68,15 @@ export async function pipeline(commands: (string | number)[][]): Promise<unknown
   if (!res.ok) {
     throw new Error(`redis pipeline ${res.status}`);
   }
-  const data = (await res.json()) as { result: unknown[] };
-  return data.result;
+  // Upstash replies with one { result } or { error } object per command.
+  const data = (await res.json()) as Array<{ result?: unknown; error?: string }>;
+  if (!Array.isArray(data)) {
+    throw new Error('redis pipeline: unexpected response shape');
+  }
+  return data.map((entry, i) => {
+    if (entry.error) throw new Error(`redis pipeline command ${i}: ${entry.error}`);
+    return entry.result ?? null;
+  });
 }
 
 /** GET many keys in batched pipelines, preserving order. Null for missing keys. */
