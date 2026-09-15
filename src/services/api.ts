@@ -76,7 +76,7 @@ async function request<T>(method: string, path: string, body?: unknown, opts?: {
 // ---------------------------------------------------------------- auth ---
 export async function apiLogin(email: string, password: string): Promise<AdminUser> {
   try {
-    const res = await request<{ token: string; user: AdminUser }>('POST', '/api/auth-login', { email, password });
+    const res = await request<{ token: string; user: AdminUser }>('POST', '/api/auth', { email, password });
     localStorage.setItem(ADMIN_TOKEN_KEY, res.token);
     return res.user;
   } catch (err) {
@@ -87,7 +87,7 @@ export async function apiLogin(email: string, password: string): Promise<AdminUs
 
 export async function apiLogout(): Promise<void> {
   try {
-    await request('POST', '/api/auth-logout');
+    await request('POST', '/api/auth', { action: 'logout' });
   } finally {
     localStorage.removeItem(ADMIN_TOKEN_KEY);
   }
@@ -97,7 +97,7 @@ export async function apiFetchSession(): Promise<AdminUser | null> {
   const t = localStorage.getItem(ADMIN_TOKEN_KEY);
   if (!t) return null;
   try {
-    return await request<AdminUser | null>('GET', '/api/auth-me');
+    return await request<AdminUser | null>('GET', '/api/auth');
   } catch {
     localStorage.removeItem(ADMIN_TOKEN_KEY);
     return null;
@@ -154,10 +154,23 @@ export interface RegisterInput {
   employeeNo: string;
   name: string;
   department: string;
+  phone: string;
+}
+
+const DEVICE_KEY = 'canteen_device_id';
+
+/** Stable per-device identifier used to enforce one-login-per-serial. */
+export function deviceIdentity(): string {
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!id) {
+    id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `dev-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(DEVICE_KEY, id);
+  }
+  return id;
 }
 
 export async function apiEmployeeRegister(input: RegisterInput): Promise<{ token: string; employee: Employee }> {
-  const res = await request<{ token: string; employee: Employee }>('POST', '/api/employee-register', input, { employee: true });
+  const res = await request<{ token: string; employee: Employee }>('POST', '/api/employee-session', { ...input, deviceId: deviceIdentity() }, { employee: true });
   storeEmployeeToken(res.token);
   storeEmployeeSerial(res.employee.serial);
   return res;
@@ -166,7 +179,7 @@ export async function apiEmployeeRegister(input: RegisterInput): Promise<{ token
 export async function apiEmployeeMe(): Promise<Employee | null> {
   if (!storedEmployeeToken()) return null;
   try {
-    const me = await request<Employee>('GET', '/api/employee-me', undefined, { employee: true });
+    const me = await request<Employee>('GET', '/api/employee-session', undefined, { employee: true });
     storeEmployeeSerial(me.serial);
     return me;
   } catch {
@@ -178,18 +191,18 @@ export async function apiEmployeeMe(): Promise<Employee | null> {
 
 export async function apiEmployeeLogout(): Promise<void> {
   try {
-    await request('POST', '/api/employee-logout', undefined, { employee: true });
+    await request('POST', '/api/employee-session', { action: 'logout' }, { employee: true });
   } finally {
     storeEmployeeToken(null);
   }
 }
 
 export async function apiScanContext(qrType: 'breakfastSnacks' | 'lunchDinner'): Promise<ScanContext> {
-  return request<ScanContext>('GET', `/api/scan-context?qr=${qrType}`, undefined, { employee: true });
+  return request<ScanContext>('GET', `/api/scan?qr=${qrType}`, undefined, { employee: true });
 }
 
 export async function apiScanConfirm(meal: string, addonIds: string[]): Promise<ConfirmScanResult> {
-  return request<ConfirmScanResult>('POST', '/api/scan-confirm', { meal, addonIds }, { employee: true });
+  return request<ConfirmScanResult>('POST', '/api/scan', { meal, addonIds }, { employee: true });
 }
 
 // ---------------------------------------------------------- employees ----
@@ -209,21 +222,21 @@ export async function apiGetEmployee(serial: string): Promise<{ exists: boolean;
 }
 
 export async function apiSaveEmployee(serial: string, data: Partial<Employee>): Promise<void> {
-  await request('POST', '/api/employee-save', { serial, ...data });
+  await request('POST', '/api/employees', { serial, ...data });
 }
 
 export async function apiDeleteEmployee(serial: string): Promise<void> {
-  await request('POST', '/api/employee-delete', { serial });
+  await request('POST', '/api/employees', { action: 'delete', serial });
 }
 
 export async function apiBulkEmployees(count: number): Promise<number> {
-  const res = await request<{ added: number }>('POST', '/api/employees-bulk', { count });
+  const res = await request<{ added: number }>('POST', '/api/employees', { count });
   return res.added;
 }
 
 /** Admin action: sign the employee out of their device. */
 export async function apiEmployeeReset(serial: string): Promise<void> {
-  await request('POST', '/api/employee-reset', { serial });
+  await request('POST', '/api/employee-session', { action: 'reset', serial });
 }
 
 // ---------------------------------------------------------- meal items ---
@@ -233,15 +246,15 @@ export async function apiListMealItems(): Promise<MealItem[]> {
 }
 
 export async function apiCreateMealItem(item: { id?: string; name: string; price: number; enabled?: boolean }): Promise<void> {
-  await request('POST', '/api/meal-item-create', item);
+  await request('POST', '/api/meal-items', item);
 }
 
 export async function apiSaveMealItem(item: MealItem): Promise<void> {
-  await request('POST', '/api/meal-item-save', { id: item.id, name: item.name, price: item.price, enabled: item.enabled });
+  await request('POST', '/api/meal-items', { action: 'save', id: item.id, name: item.name, price: item.price, enabled: item.enabled });
 }
 
 export async function apiDeleteMealItem(id: string): Promise<void> {
-  await request('POST', '/api/meal-item-delete', { id });
+  await request('POST', '/api/meal-items', { action: 'delete', id });
 }
 
 // ------------------------------------------------------------- settings ---
@@ -250,7 +263,7 @@ export async function apiGetSettings(): Promise<CanteenSettings> {
 }
 
 export async function apiSaveSettings(changes: Partial<CanteenSettings>): Promise<void> {
-  await request('POST', '/api/settings-save', changes);
+  await request('POST', '/api/settings', changes);
 }
 
 // -------------------------------------------------------- transactions ---
@@ -269,15 +282,15 @@ export async function apiListDailyEntries(from: string, to: string): Promise<Dai
 }
 
 export async function apiManualEntry(input: { serial: string; meal: string; addonIds?: string[] }): Promise<Transaction> {
-  const res = await request<{ transaction: Transaction }>('POST', '/api/manual-entry', input);
+  const res = await request<{ transaction: Transaction }>('POST', '/api/transactions', { action: 'manual', ...input });
   return res.transaction;
 }
 
 export async function apiDeleteTransaction(id: string): Promise<void> {
-  await request('POST', '/api/transaction-delete', { id });
+  await request('POST', '/api/transactions', { id });
 }
 
 export async function apiCleanupOldTransactions(cutoff: string): Promise<number> {
-  const res = await request<{ deleted: number }>('POST', '/api/cleanup', { cutoff });
+  const res = await request<{ deleted: number }>('POST', '/api/settings', { action: 'cleanup', cutoff });
   return res.deleted;
 }

@@ -902,6 +902,60 @@ route('GET', /^\/api\/events$/, async (req, res) => {
 function normalizeRequest(req, body) {
   let method = req.method;
   let urlPath = new URL(req.url || '/', 'http://x').pathname;
+  // Current client dialect: the path equals the cloud function file name and
+  // mutations carry an `action` in the JSON body. Map to internal REST form.
+  // `to()` may return a string (path only) or { path, method }.
+  const actionDialect = [
+    { path: '/api/auth', to: () => (req.method === 'GET' ? '/api/auth/me' : body.action === 'logout' ? '/api/auth/logout' : '/api/auth/login') },
+    {
+      path: '/api/employee-session',
+      to: () => {
+        if (req.method === 'GET') return '/api/employee/me';
+        if (body.action === 'logout') return '/api/employee/logout';
+        if (body.action === 'reset') return '/api/employee-reset';
+        return '/api/employee/register';
+      },
+    },
+    { path: '/api/scan', to: () => (req.method === 'GET' ? '/api/scan/context' : '/api/scan/confirm') },
+    {
+      path: '/api/employees',
+      to: () => {
+        if (req.method !== 'POST') return '/api/employees';
+        if (typeof body.count === 'number' && body.count > 0) return '/api/employees/bulk';
+        const target = `/api/employees/${encodeURIComponent(String(body.serial ?? ''))}`;
+        return body.action === 'delete' ? { path: target, method: 'DELETE' } : { path: target, method: 'PUT' };
+      },
+    },
+    {
+      path: '/api/meal-items',
+      to: () => {
+        if (req.method !== 'POST') return '/api/meal-items';
+        if (body.action === 'save') return { path: `/api/meal-items/${encodeURIComponent(String(body.id ?? ''))}`, method: 'PUT' };
+        if (body.action === 'delete') return { path: `/api/meal-items/${encodeURIComponent(String(body.id ?? ''))}`, method: 'DELETE' };
+        return '/api/meal-items';
+      },
+    },
+    { path: '/api/settings', to: () => (req.method === 'POST' ? { path: '/api/settings', method: 'PUT' } : '/api/settings') },
+    {
+      path: '/api/transactions',
+      to: () => {
+        if (req.method !== 'POST') return '/api/transactions';
+        if (body.action === 'manual') return '/api/manual-entry';
+        return { path: `/api/transactions/${encodeURIComponent(String(body.id ?? ''))}`, method: 'DELETE' };
+      },
+    },
+  ];
+  for (const c of actionDialect) {
+    if (urlPath === c.path) {
+      const t = typeof c.to === 'function' ? c.to() : c.to;
+      if (typeof t === 'string') urlPath = t;
+      else {
+        urlPath = t.path;
+        if (t.method) method = t.method;
+      }
+      return { method, urlPath };
+    }
+  }
   const canonical = [
     { path: '/api/auth-login', to: '/api/auth/login' },
     { path: '/api/auth-logout', to: '/api/auth/logout' },

@@ -1,79 +1,20 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { json } from './_lib/util';
+import { readBody, json } from './_lib/util';
 import { cloudEnabled, ensureSeeded } from './_lib/store';
 import * as scan from './_handlers/scan';
 import * as admin from './_handlers/admin';
 
-type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
-
 /**
  * Shared API router. Vercel's Hobby plan allows 12 serverless functions, so
  * each top-level api/<file>.ts delegates here and dispatches on path.
- * All endpoints are single-segment; action endpoints use POST bodies.
+ *
+ * IMPORTANT: the request path MUST equal the serving function file's name
+ * (api/auth.ts serves /api/auth, api/employees.ts serves /api/employees, …).
+ * Vercel only routes /api/<file-name> to the function — any other path 404s
+ * at the edge before our code runs. POST actions therefore carry an `action`
+ * (or `count`) field in the JSON body instead of distinct paths.
  */
-const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
-  // basics (served by api/index.ts)
-  { method: 'GET', pattern: /^\/api$/, handler: (_req, res) => json(res, 200, { ok: true, mode: 'cloud', storage: cloudEnabled ? 'upstash' : 'not-configured' }) },
-  { method: 'GET', pattern: /^\/api\/health$/, handler: (_req, res) => json(res, 200, { ok: true, mode: 'cloud', storage: cloudEnabled ? 'upstash' : 'not-configured', time: new Date().toISOString() }) },
-  { method: 'POST', pattern: /^\/api\/cleanup$/, handler: admin.cleanup },
-  { method: 'POST', pattern: /^\/api\/manual-entry$/, handler: admin.manualEntry },
-  { method: 'POST', pattern: /^\/api\/transaction-delete$/, handler: (req, res) => admin.deleteTransaction(req, res, idOf(req)) },
-  { method: 'POST', pattern: /^\/api\/employees-bulk$/, handler: admin.bulkEmployees },
-
-  // admin auth (served by api/auth.ts)
-  { method: 'POST', pattern: /^\/api\/auth-login$/, handler: admin.login },
-  { method: 'POST', pattern: /^\/api\/auth-logout$/, handler: admin.logout },
-  { method: 'GET', pattern: /^\/api\/auth-me$/, handler: admin.me },
-
-  // employees (served by api/employees.ts) — with ?serial= it is the public
-  // single-serial check used by registration and the scan pre-check.
-  { method: 'GET', pattern: /^\/api\/employees$/, handler: (req, res) => (req.query.serial ? admin.getEmployeeQuery(req, res) : admin.listEmployees(req, res)) },
-  { method: 'POST', pattern: /^\/api\/employee-save$/, handler: (req, res) => admin.saveEmployee(req, res, serialOf(req)) },
-  { method: 'POST', pattern: /^\/api\/employee-delete$/, handler: (req, res) => admin.deleteEmployee(req, res, serialOf(req)) },
-
-  // employee self-service (served by api/employee-session.ts)
-  { method: 'POST', pattern: /^\/api\/employee-register$/, handler: scan.employeeRegister },
-  { method: 'GET', pattern: /^\/api\/employee-me$/, handler: scan.employeeMe },
-  { method: 'POST', pattern: /^\/api\/employee-logout$/, handler: scan.employeeLogout },
-  // Admin action: sign the employee out of their device (they can log in again).
-  { method: 'POST', pattern: /^\/api\/employee-reset$/, handler: admin.resetEmployeeLogin },
-
-  // scan flow (served by api/scan.ts)
-  { method: 'GET', pattern: /^\/api\/scan-context$/, handler: scan.scanContext },
-  { method: 'POST', pattern: /^\/api\/scan-confirm$/, handler: scan.scanConfirm },
-
-  // meal items (served by api/meal-items.ts)
-  { method: 'GET', pattern: /^\/api\/meal-items$/, handler: admin.listMealItems },
-  { method: 'POST', pattern: /^\/api\/meal-item-create$/, handler: admin.createMealItem },
-  { method: 'POST', pattern: /^\/api\/meal-item-save$/, handler: (req, res) => admin.saveMealItem(req, res, idOf(req)) },
-  { method: 'POST', pattern: /^\/api\/meal-item-delete$/, handler: (req, res) => admin.deleteMealItem(req, res, idOf(req)) },
-
-  // settings (served by api/settings.ts)
-  { method: 'GET', pattern: /^\/api\/settings$/, handler: admin.getSettings },
-  { method: 'POST', pattern: /^\/api\/settings-save$/, handler: admin.saveSettings },
-
-  // transactions (served by api/transactions.ts)
-  { method: 'GET', pattern: /^\/api\/transactions$/, handler: admin.listTransactions },
-
-  // daily entries (served by api/daily-entries.ts)
-  { method: 'GET', pattern: /^\/api\/daily-entries$/, handler: admin.listDailyEntries },
-];
-
-/** Serial from ?serial= or body.serial (trimmed). */
-function serialOf(req: VercelRequest): string {
-  const q = req.query.serial;
-  if (typeof q === 'string' && q.trim()) return q.trim();
-  const b = req.body as Record<string, unknown> | undefined;
-  return String(b?.serial ?? '').trim();
-}
-
-/** Item id from ?id= or body.id. */
-function idOf(req: VercelRequest): string {
-  const q = req.query.id;
-  if (typeof q === 'string' && q.trim()) return q.trim();
-  const b = req.body as Record<string, unknown> | undefined;
-  return String(b?.id ?? '').trim();
-}
+type Body = Record<string, unknown> & { action?: string; count?: number };
 
 export default async function handle(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (!cloudEnabled) {
@@ -84,16 +25,73 @@ export default async function handle(req: VercelRequest, res: VercelResponse): P
   }
   const path = (req.url || '/').split('?')[0];
   await ensureSeeded();
-  for (const { method, pattern, handler } of routes) {
-    if (req.method !== method) continue;
-    if (!pattern.test(path)) continue;
-    try {
-      await handler(req, res);
-    } catch (err) {
-      console.error('[api] error:', err);
-      if (!res.writableEnded) json(res, 500, { error: 'INTERNAL', message: 'Unexpected server error.' });
+  const body: Body = req.method === 'POST' ? { ...(await readBody(req)) } : {};
+  try {
+    switch (`${req.method} ${path}`) {
+      // ---- api/index.ts ----
+      case 'GET /api':
+        return json(res, 200, { ok: true, mode: 'cloud', storage: 'upstash' });
+
+      // ---- api/auth.ts ----
+      case 'POST /api/auth':
+        if (body.action === 'logout') return await admin.logout(req, res);
+        return await admin.login(req, res);
+      case 'GET /api/auth':
+        return await admin.me(req, res);
+
+      // ---- api/employees.ts ----
+      case 'GET /api/employees':
+        return req.query.serial
+          ? await admin.getEmployeeQuery(req, res)
+          : await admin.listEmployees(req, res);
+      case 'POST /api/employees':
+        if (typeof body.count === 'number' && body.count > 0) return await admin.bulkEmployees(req, res);
+        if (body.action === 'delete') return await admin.deleteEmployee(req, res, String(body.serial ?? ''));
+        return await admin.saveEmployee(req, res, String(body.serial ?? ''));
+
+      // ---- api/employee-session.ts ----
+      case 'GET /api/employee-session':
+        return await scan.employeeMe(req, res);
+      case 'POST /api/employee-session':
+        if (body.action === 'logout') return await scan.employeeLogout(req, res);
+        if (body.action === 'reset') return await admin.resetEmployeeLogin(req, res);
+        return await scan.employeeRegister(req, res);
+
+      // ---- api/scan.ts ----
+      case 'GET /api/scan':
+        return await scan.scanContext(req, res);
+      case 'POST /api/scan':
+        return await scan.scanConfirm(req, res);
+
+      // ---- api/meal-items.ts ----
+      case 'GET /api/meal-items':
+        return await admin.listMealItems(req, res);
+      case 'POST /api/meal-items':
+        if (body.action === 'save') return await admin.saveMealItem(req, res, String(body.id ?? ''));
+        if (body.action === 'delete') return await admin.deleteMealItem(req, res, String(body.id ?? ''));
+        return await admin.createMealItem(req, res);
+
+      // ---- api/settings.ts ----
+      case 'GET /api/settings':
+        return await admin.getSettings(req, res);
+      case 'POST /api/settings':
+        if (body.action === 'cleanup') return await admin.cleanup(req, res);
+        return await admin.saveSettings(req, res);
+
+      // ---- api/transactions.ts ----
+      case 'GET /api/transactions':
+        return await admin.listTransactions(req, res);
+      case 'POST /api/transactions':
+        if (body.action === 'manual') return await admin.manualEntry(req, res);
+        return await admin.deleteTransaction(req, res, String(body.id ?? ''));
+
+      // ---- api/daily-entries.ts ----
+      case 'GET /api/daily-entries':
+        return await admin.listDailyEntries(req, res);
     }
-    return;
+    json(res, 404, { error: 'NOT_FOUND', path });
+  } catch (err) {
+    console.error('[api] error:', err);
+    if (!res.writableEnded) json(res, 500, { error: 'INTERNAL', message: 'Unexpected server error.' });
   }
-  json(res, 404, { error: 'NOT_FOUND', path });
 }
