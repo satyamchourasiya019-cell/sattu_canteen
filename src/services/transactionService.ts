@@ -20,7 +20,12 @@ export function toTransaction(id: string, data: Record<string, unknown>): Transa
   const addons = Array.isArray(data.addons)
     ? (data.addons as Record<string, unknown>[])
         .filter((a) => a && typeof a.id === 'string' && typeof a.name === 'string' && typeof a.price === 'number')
-        .map((a) => ({ id: a.id as string, name: a.name as string, price: a.price as number }))
+        .map((a) => ({
+          id: a.id as string,
+          name: a.name as string,
+          price: a.price as number,
+          qty: typeof a.qty === 'number' ? a.qty : undefined,
+        }))
     : [];
   return {
     id,
@@ -38,7 +43,13 @@ export function toTransaction(id: string, data: Record<string, unknown>): Transa
     addonAmount: typeof data.addonAmount === 'number' ? data.addonAmount : 0,
     amount: typeof data.amount === 'number' ? data.amount : 0,
     status: data.status === 'cancelled' ? 'cancelled' : 'ok',
-    mode: data.mode === 'manual' ? 'manual' : data.mode === 'addon' ? 'addon' : 'qr',
+    mode:
+      data.mode === 'manual' ? 'manual' : data.mode === 'addon' ? 'addon' : data.mode === 'order' ? 'order' : 'qr',
+    orderStatus:
+      data.orderStatus === 'new' || data.orderStatus === 'preparing' || data.orderStatus === 'done'
+        ? data.orderStatus
+        : undefined,
+    orderNote: typeof data.orderNote === 'string' ? data.orderNote : undefined,
     createdAt: typeof data.createdAt === 'number' ? data.createdAt : 0,
     updatedAt: typeof data.updatedAt === 'number' ? data.updatedAt : 0,
   };

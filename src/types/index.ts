@@ -44,6 +44,19 @@ export interface Addon {
   id: string;
   name: string;
   price: number;
+  /** Online-order lines carry a quantity; scan addons are always 1. */
+  qty?: number;
+}
+
+/** One quantity line of an online food order. */
+export interface OrderLine extends Addon {
+  qty: number;
+}
+
+/** Request body for placing an online order (employee side). */
+export interface PlaceOrderInput {
+  lines: OrderLine[];
+  note?: string;
 }
 
 /**
@@ -67,9 +80,16 @@ export interface Transaction {
   addonAmount: number;
   amount: number; // mealAmount + addonAmount
   status: 'ok' | 'cancelled';
-  mode: 'qr' | 'manual' | 'addon';
+  mode: 'qr' | 'manual' | 'addon' | 'order';
   createdAt: number;
   updatedAt: number;
+  /**
+   * Online-order tracking (mode 'order' only).
+   * status: new -> preparing -> done. Done orders leave the admin alarm list
+   * but stay in the day's billing (the amount remains on the serial's row).
+   */
+  orderStatus?: 'new' | 'preparing' | 'done';
+  orderNote?: string;
 }
 
 /** Master data for a serial number. Created by admin or self-signup. */

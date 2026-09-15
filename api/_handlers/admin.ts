@@ -26,6 +26,7 @@ import {
   canonicalSerial,
   mealSlot,
   minutesOf,
+  appNow,
 } from '../_lib/util';
 
 interface UserRecord {
@@ -36,7 +37,7 @@ interface UserRecord {
 }
 
 function todayLocal(): string {
-  return toDateString(new Date());
+  return toDateString(appNow());
 }
 
 // ---------------------------------------------------------------- auth ---
@@ -397,7 +398,7 @@ export async function manualEntry(req: VercelRequest, res: VercelResponse): Prom
     .filter((i): i is MealItemRecord => Boolean(i))
     .map((i) => ({ id: i.id, name: i.name, price: i.price }));
 
-  const d = new Date();
+  const d = appNow();
   const date = toDateString(d);
   const baseId = `${date}_${serial}_${meal}`;
   let id = baseId;
@@ -459,7 +460,7 @@ export async function cleanup(req: VercelRequest, res: VercelResponse): Promise<
   const settings = (await getJSON<SettingsRecord>(keys.settings))!;
   let deleted = 0;
   const d = new Date();
-  d.setDate(d.getDate() - Math.max(400, settings.retentionDays + 35));
+  d.setUTCDate(d.getUTCDate() - Math.max(400, settings.retentionDays + 35));
   while (toDateString(d) < cutoff) {
     const dateStr = toDateString(d);
     const ids = (await getJSON<string[]>(`txns:date:${dateStr}`)) ?? [];

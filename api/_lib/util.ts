@@ -4,12 +4,22 @@ import { getJSON, setJSON, del, keys, type SessionRecord, type EmployeeSessionRe
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
+/**
+ * Wall-clock in the canteen's timezone (IST, UTC+5:30). Vercel functions run
+ * in UTC, so every date/time string must be derived from appNow() — records
+ * must show the time the employee actually acted, not the server's UTC time.
+ */
+export const APP_TZ_OFFSET_MIN = 330; // IST = UTC + 5:30
+export function appNow(): Date {
+  return new Date(Date.now() + APP_TZ_OFFSET_MIN * 60 * 1000);
+}
+
 export function toDateString(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 export function toTimeString(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 export function minutesOf(hhmm: string): number {

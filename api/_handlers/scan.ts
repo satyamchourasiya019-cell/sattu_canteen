@@ -20,6 +20,7 @@ import {
   toDateString,
   toTimeString,
   canonicalSerial,
+  appNow,
 } from '../_lib/util';
 
 interface EmployeeSessionPayload {
@@ -213,7 +214,8 @@ export async function scanConfirm(req: VercelRequest, res: VercelResponse): Prom
     return json(res, 400, { error: 'BAD_MEAL', message: 'Unknown meal.' });
   }
   const settings = (await getJSON<SettingsRecord>(keys.settings))!;
-  const expected = detectMeal(new Date().getHours() * 60 + new Date().getMinutes(), settings.mealTimings);
+  const nowD = appNow();
+  const expected = detectMeal(nowD.getUTCHours() * 60 + nowD.getUTCMinutes(), settings.mealTimings);
   if (!expected || mealSlot(expected) !== mealSlot(meal)) {
     return json(res, 409, { error: 'WRONG_TIME', message: 'This meal is not being served at this time.' });
   }
@@ -232,7 +234,7 @@ export async function scanConfirm(req: VercelRequest, res: VercelResponse): Prom
     addons.push({ id: item.id, name: item.name, price: item.price });
   }
 
-  const d = new Date();
+  const d = appNow();
   const date = toDateString(d);
   const time = toTimeString(d);
   const now = Date.now();

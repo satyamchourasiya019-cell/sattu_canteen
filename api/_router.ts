@@ -3,6 +3,8 @@ import { readBody, json } from './_lib/util';
 import { cloudEnabled, ensureSeeded } from './_lib/store';
 import * as scan from './_handlers/scan';
 import * as admin from './_handlers/admin';
+import * as order from './_handlers/order';
+import * as payments from './_handlers/payments';
 
 /**
  * Shared API router. Vercel's Hobby plan allows 12 serverless functions, so
@@ -63,6 +65,18 @@ export default async function handle(req: VercelRequest, res: VercelResponse): P
         return await scan.scanContext(req, res);
       case 'POST /api/scan':
         return await scan.scanConfirm(req, res);
+
+      // ---- api/order.ts (online food ordering) ----
+      case 'GET /api/order':
+        return await order.listOrders(req, res);
+      case 'POST /api/order':
+        return await order.placeOrder(req, res);
+
+      // ---- api/payments.ts (month-end settlement) ----
+      case 'GET /api/payments':
+        return await payments.paymentsHandler(req, res);
+      case 'POST /api/payments':
+        return await payments.savePayment(req, res);
 
       // ---- api/meal-items.ts ----
       case 'GET /api/meal-items':

@@ -27,13 +27,22 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h admin sessions
 // ---------------------------------------------------------------- data ---
 const now = () => Date.now();
 
+/**
+ * Wall-clock in the canteen's timezone (IST, UTC+5:30). Vercel functions run
+ * in UTC, so all date/time strings are computed here — records must show the
+ * time the employee actually scanned, not the server's UTC time.
+ */
+const APP_TZ_OFFSET_MIN = 330; // IST = UTC + 5:30
+function appNow() {
+  return new Date(Date.now() + APP_TZ_OFFSET_MIN * 60 * 1000);
+}
 function toDateString(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 function toTimeString(d) {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
-function todayStr() { return toDateString(new Date()); }
+function todayStr() { return toDateString(appNow()); }
 
 let db = null;
 
@@ -228,7 +237,7 @@ function mealSlot(meal) {
 }
 
 function currentMealNow() {
-  const d = new Date();
+  const d = appNow();
   return {
     meal: detectMeal(minutesOf(`${toTimeString(d)}`)),
     time: toTimeString(d),
@@ -647,7 +656,7 @@ route('POST', /^\/api\/scan\/confirm$/, async (req, res) => {
   if (!['breakfast', 'lunch', 'snacks', 'dinner'].includes(meal)) {
     return json(res, 400, { error: 'BAD_MEAL', message: 'Unknown meal.' });
   }
-  const expectedMeal = detectMeal(minutesOf(toTimeString(new Date())));
+  const expectedMeal = detectMeal(minutesOf(toTimeString(appNow())));
   if (!expectedMeal || mealSlot(expectedMeal) !== mealSlot(meal)) {
     return json(res, 409, { error: 'WRONG_TIME', message: 'This meal is not being served at this time.' });
   }
@@ -664,7 +673,7 @@ route('POST', /^\/api\/scan\/confirm$/, async (req, res) => {
   }
 
   const dateStr = todayStr();
-  const nowTime = toTimeString(new Date());
+  const nowTime = toTimeString(appNow());
   const baseId = `${dateStr}_${s.serial}_${meal}`;
   const existing = db.transactions[baseId];
 
@@ -838,7 +847,7 @@ route('POST', /^\/api\/manual-entry$/, async (req, res, m, body, s) => {
     name: emp.name || '',
     department: emp.department || '',
     date: dateStr,
-    time: toTimeString(new Date()),
+    time: toTimeString(appNow()),
     qrType: mealSlot(meal),
     meal,
     mealAmount: mealAmt,
@@ -882,6 +891,205 @@ route('POST', /^\/api\/cleanup$/, async (req, res, m, body, s) => {
 });
 
 // ---- realtime stream ----
+// ---- online food ordering ----
+// Employee places/extends one open order per day; admin sees the live feed
+// and marks orders preparing/done. Money lands on the serial's day row
+// automatically because it is a normal transaction (mode 'order').
+route('GET', /^\/api\/order$/, async (req, res, m, body, s) => {
+  if (req.query.menu) {
+    const items = Object.values(db.mealItems).filter((i) => i.enabled).sort((a, b) => a.name.localeCompare(b.name));
+    return json(res, 200, { items });
+  }
+  const dateStr = todayStr();
+  // Employee session? → return their open order.
+  const empSess = getEmployeeSession(req);
+  if (empSess) {
+    const mine = Object.values(db.transactions).find(
+      (t) => t.serial === empSess.serial && t.mode === 'order' && t.orderStatus !== 'done',
+    );
+    return json(res, 200, { date: dateStr, orders: [], mine: mine ?? null });
+  }
+  const adminSess = s || getSession(req);
+  if (!adminSess) return json(res, 401, { error: 'UNAUTHENTICATED' });
+  const orders = Object.values(db.transactions)
+    .filter((t) => t.date === dateStr && t.mode === 'order')
+    .sort((a, b) => b.createdAt - a.createdAt);
+  json(res, 200, { date: dateStr, orders });
+});
+
+route('POST', /^\/api\/order$/, async (req, res, m, body, s) => {
+  if (body.action === 'preparing' || body.action === 'done') {
+    const adminSess = s || getSession(req);
+    if (!adminSess) return json(res, 401, { error: 'UNAUTHENTICATED' });
+    const t = db.transactions[String(body.id || '')];
+    if (!t || t.mode !== 'order') return json(res, 404, { error: 'NOT_FOUND', message: 'Order not found.' });
+    t.orderStatus = body.action;
+    t.updatedAt = now();
+    saveDb();
+    broadcast('transactions', { id: t.id, date: t.date });
+    return json(res, 200, { ok: true, id: t.id, orderStatus: t.orderStatus });
+  }
+  if (!s) {
+    const empSess = getEmployeeSession(req);
+    if (!empSess) return json(res, 401, { error: 'UNAUTHENTICATED', message: 'Please log in first.' });
+    s = empSess;
+  }
+  const emp = db.employees[s.serial];
+  if (!emp || emp.active === false) {
+    return json(res, 401, { error: 'UNAUTHENTICATED', message: 'Your login is no longer active. Please log in again.' });
+  }
+  const rawLines = Array.isArray(body.lines) ? body.lines.slice(0, 12) : [];
+  if (rawLines.length === 0) {
+    return json(res, 400, { error: 'VALIDATION', message: 'Select at least one item.' });
+  }
+  const lines = [];
+  for (const raw of rawLines) {
+    const item = db.mealItems[String(raw.id)];
+    if (!item || !item.enabled) {
+      return json(res, 400, { error: 'VALIDATION', message: 'One of the selected items is no longer available.' });
+    }
+    const qty = Math.floor(Number(raw.qty));
+    if (!Number.isFinite(qty) || qty < 1 || qty > 10) {
+      return json(res, 400, { error: 'VALIDATION', message: 'Each item quantity must be between 1 and 10.' });
+    }
+    lines.push({ id: item.id, name: item.name, price: item.price, qty });
+  }
+  const note = String(body.note || '').trim().slice(0, 140);
+  const added = lines.reduce((sum, l) => sum + l.price * l.qty, 0);
+  const dateStr = todayStr();
+  const existing = Object.values(db.transactions).find(
+    (t) => t.serial === s.serial && t.mode === 'order' && t.orderStatus !== 'done',
+  );
+  if (existing) {
+    const merged = new Map();
+    for (const l of existing.addons) merged.set(l.id, { ...l, qty: l.qty ?? 1 });
+    for (const l of lines) {
+      const cur = merged.get(l.id);
+      if (cur) cur.qty += l.qty;
+      else merged.set(l.id, { ...l });
+    }
+    const all = [...merged.values()];
+    if (all.length > 12) return json(res, 400, { error: 'VALIDATION', message: 'This order already has too many items.' });
+    const addonAmount = all.reduce((sum, l) => sum + l.price * l.qty, 0);
+    existing.addons = all;
+    existing.addonAmount = addonAmount;
+    existing.amount = existing.mealAmount + addonAmount;
+    if (note) existing.orderNote = [existing.orderNote, note].filter(Boolean).join(' | ').slice(0, 200);
+    existing.updatedAt = now();
+    saveDb();
+    broadcast('transactions', { id: existing.id, date: existing.date });
+    return json(res, 200, { order: existing, extended: true, added });
+  }
+  let n = 1;
+  let id = `${dateStr}_${s.serial}_order`;
+  while (db.transactions[id]) {
+    n += 1;
+    id = `${dateStr}_${s.serial}_order${n}`;
+  }
+  const txn = {
+    id,
+    employeeId: s.serial,
+    employeeNo: emp.employeeNo || '',
+    serial: s.serial,
+    name: emp.name || '',
+    department: emp.department || '',
+    date: dateStr,
+    time: toTimeString(appNow()),
+    qrType: 'breakfastSnacks',
+    meal: 'snacks',
+    mealAmount: 0,
+    addons: lines,
+    addonAmount: added,
+    amount: added,
+    status: 'ok',
+    mode: 'order',
+    orderStatus: 'new',
+    orderNote: note || undefined,
+    createdAt: now(),
+    updatedAt: now(),
+  };
+  db.transactions[id] = txn;
+  saveDb();
+  broadcast('transactions', { id, date: dateStr });
+  json(res, 201, { order: txn, extended: false, added });
+});
+
+// ---- monthly payments (admin) ----
+// Month-end settlement: per-serial billed total for a month, payment status
+// (fully / partial / none) and carry-forward of unpaid balances.
+function prevMonthKey(month) {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+route('GET', /^\/api\/payments$/, async (req, res, m, body, s) => {
+  if (!s) return json(res, 401, { error: 'UNAUTHENTICATED' });
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : todayStr().slice(0, 7);
+  const [y, mm] = month.split('-').map(Number);
+  const days = new Date(Date.UTC(y, mm, 0)).getUTCDate();
+  const billedBySerial = {};
+  for (let day = 1; day <= days; day++) {
+    const dateStr = `${month}-${String(day).padStart(2, '0')}`;
+    for (const t of Object.values(db.transactions)) {
+      if (t.date !== dateStr || t.status === 'cancelled') continue;
+      billedBySerial[t.serial] = (billedBySerial[t.serial] || 0) + t.amount;
+    }
+  }
+  db.payments = db.payments || {};
+  const carryBySerial = {};
+  let pm = prevMonthKey(month);
+  for (let i = 0; i < 12; i++) {
+    const idx = db.payments[pm];
+    if (idx) {
+      for (const [serial, row] of Object.entries(idx.rows)) {
+        const remaining = Math.max(0, row.remaining || 0);
+        if (remaining > 0) carryBySerial[serial] = (carryBySerial[serial] || 0) + remaining;
+      }
+    }
+    pm = prevMonthKey(pm);
+  }
+  const saved = db.payments[month] || { month, rows: {} };
+  const rows = [];
+  // Serials with billing this month, saved payment rows, or pending carry-in.
+  const serials = new Set([...Object.keys(billedBySerial), ...Object.keys(saved.rows), ...Object.keys(carryBySerial)]);
+  for (const serial of [...serials].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))) {
+    const emp = db.employees[serial] || {};
+    const sr = saved.rows[serial];
+    rows.push({
+      serial,
+      name: emp.name || '',
+      department: emp.department || '',
+      billed: billedBySerial[serial] || 0,
+      paid: sr?.paid ?? 0,
+      carryIn: carryBySerial[serial] || 0,
+      status: sr?.status ?? null,
+      updatedAt: sr?.updatedAt ?? null,
+    });
+  }
+  json(res, 200, { month, rows });
+});
+
+route('POST', /^\/api\/payments$/, async (req, res, m, body, s) => {
+  if (!s) return json(res, 401, { error: 'UNAUTHENTICATED' });
+  const month = /^\d{4}-\d{2}$/.test(String(body.month || '')) ? String(body.month) : todayStr().slice(0, 7);
+  const serial = String(body.serial || '').trim();
+  const status = body.status;
+  if (!serial) return json(res, 400, { error: 'VALIDATION', message: 'Serial is required.' });
+  if (!['fully', 'partial', 'none'].includes(status)) {
+    return json(res, 400, { error: 'VALIDATION', message: 'Status must be fully, partial or none.' });
+  }
+  db.payments = db.payments || {};
+  const saved = db.payments[month] || { month, rows: {} };
+  const current = saved.rows[serial] || { paid: 0, status, updatedAt: 0 };
+  const paid = status === 'none' ? 0 : typeof body.paid === 'number' ? Math.max(0, Math.round(body.paid)) : current.paid;
+  const remaining = Math.max(0, Math.round(Number(body.remaining) || 0));
+  saved.rows[serial] = { paid, status, remaining, updatedAt: now() };
+  db.payments[month] = saved;
+  saveDb();
+  json(res, 200, { ok: true, month, serial, ...saved.rows[serial] });
+});
+
 route('GET', /^\/api\/events$/, async (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',

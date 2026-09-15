@@ -4,10 +4,11 @@ import { useAdminAuth } from './hooks/useAdminAuth';
 import EmployeeHome from './pages/employee/EmployeeHome';
 import QrScanPage from './pages/employee/QrScanPage';
 import ScanPage from './pages/employee/ScanPage';
+import OrderPage from './pages/employee/OrderPage';
+import EmployeeShell from './components/EmployeeShell';
 import LoginPage from './pages/LoginPage';
 import AdminLayout from './pages/admin/AdminLayout';
 import DashboardPage from './pages/admin/DashboardPage';
-import SerialsPage from './pages/admin/SerialsPage';
 import TransactionsPage from './pages/admin/TransactionsPage';
 import EmployeesPage from './pages/admin/EmployeesPage';
 import MealsPage from './pages/admin/MealsPage';
@@ -45,8 +46,9 @@ export default function App(): JSX.Element {
       <Routes>
         <Route path="/" element={<Navigate to="/user-ordering" replace />} />
         <Route path="/user-ordering" element={<EmployeeHome />} />
-        <Route path="/scan" element={<QrScanPage />} />
-        <Route path="/qr/:qrType" element={<ScanPage />} />
+        <Route path="/scan" element={<EmployeeShell><QrScanPage /></EmployeeShell>} />
+        <Route path="/order" element={<OrderPage />} />
+        <Route path="/qr/:qrType" element={<EmployeeShell><ScanPage /></EmployeeShell>} />
 
         <Route path="/admin/login" element={<LoginPage />} />
         <Route
@@ -58,7 +60,6 @@ export default function App(): JSX.Element {
           }
         >
           <Route index element={<DashboardPage />} />
-          <Route path="serials" element={<SerialsPage />} />
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="employees" element={<EmployeesPage />} />
           <Route path="meals" element={<MealsPage />} />

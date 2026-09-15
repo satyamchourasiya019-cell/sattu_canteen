@@ -1,34 +1,128 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import EmployeeShell from '../../components/EmployeeShell';
 import { useEmployeeSession } from '../../hooks/useEmployeeSession';
 import { useSettings } from '../../hooks/useSettings';
 import { ApiError } from '../../services/api';
 import { friendlyMessage } from '../../utils/errors';
-import { formatDisplayDate, todayDateString } from '../../utils/format';
 
 type FieldErrors = Partial<Record<'serial' | 'name' | 'phone' | 'form', string>>;
 
 /**
- * App-style login: the employee signs in ONCE with serial + name (+ phone,
- * department). The device stays logged in until the ADMIN removes it —
- * "Not you? Log out" only frees the serial for the next person; one serial
- * can be logged in on a single device at a time.
+ * Employee home. Two states:
+ *  - NOT logged in: a clean app-style login card (serial, name, phone, dept).
+ *  - Logged in: rendered inside EmployeeShell (name header, bottom nav) with
+ *    the two big actions — Scan Canteen QR and Order Food.
  */
 export default function EmployeeHome(): JSX.Element {
-  const { employee, loading, login, logout } = useEmployeeSession();
+  const { employee, loading, login } = useEmployeeSession();
   const { settings } = useSettings();
-  const navigate = useNavigate();
 
+  if (loading) {
+    return (
+      <div className="boot-screen">
+        <div className="spinner" aria-hidden />
+        <p>Loading…</p>
+      </div>
+    );
+  }
+
+  if (employee) {
+    return (
+      <EmployeeShell>
+        <HomeBody />
+      </EmployeeShell>
+    );
+  }
+
+  return <LoginBody canteenName={settings.canteenName} onLogin={login} />;
+}
+
+function HomeBody(): JSX.Element {
+  const { employee } = useEmployeeSession();
+  const navigate = useNavigate();
+  const [scanError, setScanError] = useState(false);
+
+  return (
+    <div className="pad-lg">
+      {scanError && (
+        <div className="banner banner-error">
+          The scanner could not open on this device. Use the counter links below or open this site over HTTPS.
+        </div>
+      )}
+
+      <button type="button" className="scan-cta" onClick={() => navigate('/scan')} data-test="scan-cta">
+        <span className="scan-cta-icon" aria-hidden>
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+          </svg>
+        </span>
+        <span>
+          <strong>Scan Canteen QR</strong>
+          <small>Record your meal at the counter</small>
+        </span>
+      </button>
+
+      <button type="button" className="order-cta" onClick={() => navigate('/order')} data-test="order-cta">
+        <span className="order-cta-icon" aria-hidden>
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6l-2-4z" /><line x1="4" y1="6" x2="20" y2="6" /><path d="M16 10a4 4 0 0 1-8 0" /></svg>
+        </span>
+        <span>
+          <strong>Order Food Online</strong>
+          <small>Pick items — canteen prepares them</small>
+        </span>
+        <span className="order-cta-arrow" aria-hidden>→</span>
+      </button>
+
+      <p className="muted small center-text">No camera? Open a counter link directly:</p>
+      <div className="qr-btn-row">
+        <button
+          type="button"
+          className="qr-btn compact"
+          onClick={() => {
+            navigate('/qr/breakfastSnacks');
+            setScanError(false);
+          }}
+        >
+          <span className="qr-btn-icon" aria-hidden>🌅</span>
+          <span><strong>Breakfast / Snacks</strong></span>
+        </button>
+        <button
+          type="button"
+          className="qr-btn compact"
+          onClick={() => {
+            navigate('/qr/lunchDinner');
+            setScanError(false);
+          }}
+        >
+          <span className="qr-btn-icon" aria-hidden>🍛</span>
+          <span><strong>Lunch / Dinner</strong></span>
+        </button>
+      </div>
+
+      {employee && (
+        <p className="muted small center-text login-note">
+          You stay logged in on this phone until the canteen admin removes you.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function LoginBody({
+  canteenName,
+  onLogin,
+}: {
+  canteenName: string;
+  onLogin: (input: { serial: string; employeeNo: string; name: string; department: string; phone: string }) => Promise<unknown>;
+}): JSX.Element {
   const [serial, setSerial] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [department, setDepartment] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    setErrors({});
-  }, [serial, name, phone, department]);
 
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -42,7 +136,7 @@ export default function EmployeeHome(): JSX.Element {
 
     setSubmitting(true);
     try {
-      await login({
+      await onLogin({
         serial: serial.trim().replace(/\s+/g, ''),
         employeeNo: '',
         name: name.trim(),
@@ -60,93 +154,15 @@ export default function EmployeeHome(): JSX.Element {
     }
   }
 
-  async function handleSwitchUser(): Promise<void> {
-    await logout();
-    setSerial('');
-    setName('');
-    setPhone('');
-    setDepartment('');
-  }
-
-  if (loading) {
-    return (
-      <div className="order-wrap center">
-        <div className="spinner" aria-hidden />
-        <p className="muted">Loading…</p>
-      </div>
-    );
-  }
-
-  if (employee) {
-    return (
-      <div className="order-wrap">
-        <header className="order-header">
-          <div className="order-logo" aria-hidden>🍽</div>
-          <h1>{settings.canteenName || 'Canteen'}</h1>
-          <p className="muted">{formatDisplayDate(todayDateString())}</p>
-        </header>
-
-        <div className="order-card">
-          <div className="id-card">
-            <div className="id-avatar" aria-hidden>{(employee.name || '?').slice(0, 1).toUpperCase()}</div>
-            <div>
-              <div className="id-name">{employee.name || 'Employee'}</div>
-              <div className="id-meta">
-                Serial <strong>{employee.serial}</strong>
-                {employee.employeeNo ? <> · Emp No <strong>{employee.employeeNo}</strong></> : null}
-                {employee.department ? <> · {employee.department}</> : null}
-              </div>
-            </div>
-          </div>
-
-          <button type="button" className="scan-cta" onClick={() => navigate('/scan')}>
-            <span className="scan-cta-icon" aria-hidden>
-              <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
-                <line x1="3" y1="12" x2="21" y2="12" />
-              </svg>
-            </span>
-            <span>
-              <strong>Scan Canteen QR</strong>
-              <small>Camera opens — point at the counter code</small>
-            </span>
-          </button>
-
-          <p className="muted small center-text">No camera? Open a counter link directly:</p>
-          <div className="qr-btn-row">
-            <Link to="/qr/breakfastSnacks" className="qr-btn compact">
-              <span className="qr-btn-icon" aria-hidden>🌅</span>
-              <span><strong>Breakfast / Snacks</strong></span>
-            </Link>
-            <Link to="/qr/lunchDinner" className="qr-btn compact">
-              <span className="qr-btn-icon" aria-hidden>🍛</span>
-              <span><strong>Lunch / Dinner</strong></span>
-            </Link>
-          </div>
-
-          <p className="muted small center-text login-note">
-            You stay logged in on this phone until the canteen admin removes you.
-          </p>
-          <button type="button" className="btn-ghost small logout-link" onClick={handleSwitchUser}>
-            Not you? Log out
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="order-wrap">
-      <header className="order-header">
-        <div className="order-logo" aria-hidden>🍽</div>
-        <h1>{settings.canteenName || 'Canteen'}</h1>
-        <p className="muted">{formatDisplayDate(todayDateString())}</p>
-      </header>
+    <div className="login-screen">
+      <div className="login-brand">
+        <div className="login-logo" aria-hidden>🍽</div>
+        <h1>{canteenName || 'Canteen'}</h1>
+        <p>Employee sign in</p>
+      </div>
 
-      <form className="order-card" onSubmit={handleSubmit}>
-        <h2 className="order-title">Employee Login</h2>
-        <p className="muted small">One time only — this phone will remember you until the admin removes you.</p>
-
+      <form className="login-card" onSubmit={handleSubmit}>
         <label className="field-label" htmlFor="reg-serial">
           Serial Number *
           <input
@@ -174,37 +190,39 @@ export default function EmployeeHome(): JSX.Element {
         </label>
         {errors.name && <div className="field-error">{errors.name}</div>}
 
-        <label className="field-label" htmlFor="reg-phone">
-          Phone Number
-          <input
-            id="reg-phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="e.g. 98765 43210"
-            value={phone}
-            maxLength={20}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-        </label>
+        <div className="field-split">
+          <label className="field-label" htmlFor="reg-phone">
+            Phone
+            <input
+              id="reg-phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="98765 43210"
+              value={phone}
+              maxLength={20}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          </label>
+          <label className="field-label" htmlFor="reg-dept">
+            Department
+            <input
+              id="reg-dept"
+              placeholder="Production"
+              value={department}
+              maxLength={40}
+              onChange={(e) => setDepartment(e.target.value)}
+            />
+          </label>
+        </div>
         {errors.phone && <div className="field-error">{errors.phone}</div>}
-
-        <label className="field-label" htmlFor="reg-dept">
-          Department
-          <input
-            id="reg-dept"
-            placeholder="e.g. Production"
-            value={department}
-            maxLength={40}
-            onChange={(e) => setDepartment(e.target.value)}
-          />
-        </label>
 
         {errors.form && <div className="banner banner-error">{errors.form}</div>}
 
         <button type="submit" className="btn-primary btn-block" disabled={submitting}>
-          {submitting ? 'Logging in…' : 'Login'}
+          {submitting ? 'Signing in…' : 'Sign In'}
         </button>
+        <p className="muted small center-text">One time only — this phone will remember you until the admin removes you.</p>
       </form>
     </div>
   );

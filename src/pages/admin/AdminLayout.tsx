@@ -4,11 +4,10 @@ import { adminSignOut } from '../../services/authService';
 
 const NAV = [
   { to: '/admin', label: 'Dashboard', end: true },
-  { to: '/admin/serials', label: 'Serial Numbers' },
-  { to: '/admin/transactions', label: 'Transactions' },
+  { to: '/admin/transactions', label: 'Payments' },
   { to: '/admin/employees', label: 'Employees' },
   { to: '/admin/meals', label: 'Meals & Items' },
-  { to: '/admin/reports', label: 'Reports' },
+  { to: '/admin/reports', label: 'History' },
   { to: '/admin/settings', label: 'Settings' },
 ];
 

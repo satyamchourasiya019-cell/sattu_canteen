@@ -148,13 +148,16 @@ export interface TransactionRecord {
   qrType: 'breakfastSnacks' | 'lunchDinner';
   meal: string;
   mealAmount: number;
-  addons: Addon[];
+  addons: (Addon & { qty?: number })[];
   addonAmount: number;
   amount: number;
   status: 'ok' | 'cancelled';
-  mode: 'qr' | 'manual' | 'addon';
+  mode: 'qr' | 'manual' | 'addon' | 'order';
   createdAt: number;
   updatedAt: number;
+  /** Online-order tracking: new -> preparing -> done. */
+  orderStatus?: 'new' | 'preparing' | 'done';
+  orderNote?: string;
 }
 
 export interface SettingsRecord {

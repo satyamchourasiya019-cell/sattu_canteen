@@ -239,6 +239,48 @@ export async function apiEmployeeReset(serial: string): Promise<void> {
   await request('POST', '/api/employee-session', { action: 'reset', serial });
 }
 
+// ------------------------------------------------------------ payments ---
+export interface PaymentRow {
+  serial: string;
+  name: string;
+  department: string;
+  billed: number;
+  paid: number;
+  carryIn: number;
+  status: 'fully' | 'partial' | 'none' | null;
+  updatedAt: number | null;
+}
+
+export async function apiGetPayments(month: string): Promise<{ month: string; rows: PaymentRow[] }> {
+  return request('GET', `/api/payments?month=${month}`);
+}
+
+export async function apiSavePayment(input: { serial: string; month?: string; status: 'fully' | 'partial' | 'none'; paid?: number; remaining?: number }): Promise<void> {
+  await request('POST', '/api/payments', input);
+}
+
+// ------------------------------------------------------- online orders ---
+export async function apiListOrders(): Promise<{ date: string; orders: Transaction[] }> {
+  return request('GET', '/api/order');
+}
+
+export async function apiGetMyOrder(): Promise<{ date: string; mine: Transaction | null }> {
+  return request('GET', '/api/order', undefined, { employee: true });
+}
+
+export async function apiPublicMenu(): Promise<MealItem[]> {
+  const res = await request<{ items: MealItem[] }>('GET', '/api/order?menu=1');
+  return res.items;
+}
+
+export async function apiPlaceOrder(lines: { id: string; qty: number }[], note?: string): Promise<{ order: Transaction; extended: boolean; added: number }> {
+  return request('POST', '/api/order', { lines, note }, { employee: true });
+}
+
+export async function apiSetOrderStatus(id: string, action: 'preparing' | 'done'): Promise<void> {
+  await request('POST', '/api/order', { id, action });
+}
+
 // ---------------------------------------------------------- meal items ---
 export async function apiListMealItems(): Promise<MealItem[]> {
   const res = await request<{ items: MealItem[] }>('GET', '/api/meal-items');

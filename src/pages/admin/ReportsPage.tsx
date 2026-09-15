@@ -5,12 +5,12 @@ import { aggregateDailyEntries } from '../../services/transactionService';
 import { formatCurrency, toDateString, todayDateString } from '../../utils/format';
 import { MEAL_LABELS, MEALS, type MealType } from '../../types';
 
-type Tab = 'daily' | 'monthly' | 'employee' | 'department' | 'meal';
+type Tab = 'employee' | 'daily' | 'monthly' | 'department' | 'meal';
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'employee', label: 'Employee History' },
   { id: 'daily', label: 'Daily' },
   { id: 'monthly', label: 'Monthly' },
-  { id: 'employee', label: 'Employee-wise' },
   { id: 'department', label: 'Department-wise' },
   { id: 'meal', label: 'Meal-wise' },
 ];
@@ -24,7 +24,8 @@ function daysAgoStr(n: number): string {
 export default function ReportsPage(): JSX.Element {
   const [from, setFrom] = useState(daysAgoStr(29));
   const [to, setTo] = useState(todayDateString());
-  const [tab, setTab] = useState<Tab>('daily');
+  const [tab, setTab] = useState<Tab>('employee');
+  const [empSearch, setEmpSearch] = useState('');
   const { txns, loading } = useTransactionsRange(from, to);
 
   const active = useMemo(() => txns.filter((t) => t.status !== 'cancelled'), [txns]);
@@ -68,27 +69,40 @@ export default function ReportsPage(): JSX.Element {
     return [...m.values()].sort((a, b) => b.month.localeCompare(a.month));
   }, [active]);
 
-  const employeeRows = useMemo(() => aggregateDailyEntries(active)
-    .reduce((rows, e) => {
-      const existing = rows.find((r) => r.serial === e.serial);
-      if (existing) {
-        existing.transactions += 1;
-        existing.total += e.total;
-        existing.breakfast += e.breakfast > 0 ? 1 : 0;
-        existing.snacks += e.snacks > 0 ? 1 : 0;
-        existing.lunch += e.lunch > 0 ? 1 : 0;
-        existing.dinner += e.dinner > 0 ? 1 : 0;
-      } else {
-        rows.push({
-          serial: e.serial, employeeNo: e.employeeNo, name: e.name, department: e.department,
-          transactions: 1, total: e.total,
-          breakfast: e.breakfast > 0 ? 1 : 0, snacks: e.snacks > 0 ? 1 : 0,
-          lunch: e.lunch > 0 ? 1 : 0, dinner: e.dinner > 0 ? 1 : 0,
-        });
-      }
-      return rows;
-    }, [] as { serial: string; employeeNo: string; name: string; department: string; transactions: number; total: number; breakfast: number; snacks: number; lunch: number; dinner: number }[])
-    .sort((a, b) => a.serial.localeCompare(b.serial, undefined, { numeric: true })), [active]);
+  const employeeRows = useMemo(() => {
+    // Online orders are not part of DailyEntry meal columns — count them
+    // straight from the transactions, then merge with the day aggregation.
+    const online = new Map<string, { count: number; amount: number }>();
+    for (const t of active) {
+      if (t.mode !== 'order') continue;
+      const o = online.get(t.serial) ?? { count: 0, amount: 0 };
+      o.count += 1;
+      o.amount += t.amount;
+      online.set(t.serial, o);
+    }
+    return aggregateDailyEntries(active)
+      .reduce((rows, e) => {
+        const existing = rows.find((r) => r.serial === e.serial);
+        if (existing) {
+          existing.transactions += 1;
+          existing.total += e.total;
+          existing.breakfast += e.breakfast > 0 ? 1 : 0;
+          existing.snacks += e.snacks > 0 ? 1 : 0;
+          existing.lunch += e.lunch > 0 ? 1 : 0;
+          existing.dinner += e.dinner > 0 ? 1 : 0;
+        } else {
+          rows.push({
+            serial: e.serial, employeeNo: e.employeeNo, name: e.name, department: e.department,
+            transactions: 1, total: e.total,
+            breakfast: e.breakfast > 0 ? 1 : 0, snacks: e.snacks > 0 ? 1 : 0,
+            lunch: e.lunch > 0 ? 1 : 0, dinner: e.dinner > 0 ? 1 : 0,
+          });
+        }
+        return rows;
+      }, [] as { serial: string; employeeNo: string; name: string; department: string; transactions: number; total: number; breakfast: number; snacks: number; lunch: number; dinner: number; onlineOrders?: number }[])
+      .map((r) => ({ ...r, onlineOrders: online.get(r.serial)?.count ?? 0 }))
+      .sort((a, b) => a.serial.localeCompare(b.serial, undefined, { numeric: true }));
+  }, [active]);
 
   const departmentRows = useMemo(() => {
     const m = new Map<string, { department: string; transactions: number; employees: Set<string>; amount: number }>();
@@ -121,7 +135,7 @@ export default function ReportsPage(): JSX.Element {
   return (
     <div className="page">
       <div className="page-head">
-        <h1>Reports</h1>
+        <h1>History</h1>
         <button
           type="button"
           className="btn-primary"
@@ -194,28 +208,50 @@ export default function ReportsPage(): JSX.Element {
         )}
 
         {tab === 'employee' && (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead><tr><th>Serial</th><th>Emp No</th><th>Name</th><th>Department</th><th>Transactions</th><th className="num">Breakfast days</th><th className="num">Snacks days</th><th className="num">Lunch days</th><th className="num">Dinner days</th><th className="num">Total ₹</th></tr></thead>
-              <tbody>
-                {employeeRows.map((r) => (
-                  <tr key={r.serial}>
-                    <td className="mono">{r.serial}</td>
-                    <td className="mono">{r.employeeNo || '—'}</td>
-                    <td>{r.name || '—'}</td>
-                    <td>{r.department || '—'}</td>
-                    <td>{r.transactions}</td>
-                    <td className="num">{r.breakfast}</td>
-                    <td className="num">{r.snacks}</td>
-                    <td className="num">{r.lunch}</td>
-                    <td className="num">{r.dinner}</td>
-                    <td className="num"><strong>{formatCurrency(r.total)}</strong></td>
-                  </tr>
-                ))}
-                {employeeRows.length === 0 && !loading && <tr><td colSpan={10} className="empty-row">No data in this range.</td></tr>}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="filter-row">
+              <input
+                className="search-input"
+                placeholder="Search employee by serial / name / department…"
+                value={empSearch}
+                onChange={(e) => setEmpSearch(e.target.value)}
+              />
+            </div>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead><tr><th>Serial</th><th>Emp No</th><th>Name</th><th>Department</th><th>Visits</th><th className="num">Breakfast days</th><th className="num">Snacks days</th><th className="num">Lunch days</th><th className="num">Dinner days</th><th className="num">Online orders</th><th className="num">Total ₹</th></tr></thead>
+                <tbody>
+                  {employeeRows
+                    .filter((r) => {
+                      const q = empSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        r.serial.toLowerCase().includes(q) ||
+                        r.employeeNo.toLowerCase().includes(q) ||
+                        (r.name || '').toLowerCase().includes(q) ||
+                        (r.department || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map((r) => (
+                      <tr key={r.serial}>
+                        <td className="mono">{r.serial}</td>
+                        <td className="mono">{r.employeeNo || '—'}</td>
+                        <td>{r.name || '—'}</td>
+                        <td>{r.department || '—'}</td>
+                        <td>{r.transactions}</td>
+                        <td className="num">{r.breakfast}</td>
+                        <td className="num">{r.snacks}</td>
+                        <td className="num">{r.lunch}</td>
+                        <td className="num">{r.dinner}</td>
+                        <td className="num">{r.onlineOrders}</td>
+                        <td className="num"><strong>{formatCurrency(r.total)}</strong></td>
+                      </tr>
+                    ))}
+                  {employeeRows.length === 0 && !loading && <tr><td colSpan={11} className="empty-row">No data in this range.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {tab === 'department' && (
